@@ -1,0 +1,72 @@
+
+    flowchart TD
+        %% Title
+        title["Market Data Flow with Multiple Transport Methods"]
+        classDef invisible fill:none,stroke:none
+        class title invisible
+
+            %% Styles for transport methods
+        classDef rabbitmq fill:#ff9900,stroke:#333,stroke-width:1px
+        classDef fix fill:#3498db,stroke:#333,stroke-width:1px
+        classDef rest fill:#2ecc71,stroke:#333,stroke-width:1px
+    %% Market Data Providers section with horizontal layout
+    subgraph MDPs ["Market Data Providers"]
+        direction LR
+        MDPN["Provider N"]
+    end
+
+    %% Line Handlers section with horizontal layout
+    subgraph LHs ["Line Handlers"]
+        direction LR
+        LHN["Handler N"]
+    end
+
+    %% Connect provider to handler
+    MDPN -->|FIX| LHN
+
+    %% Sequence Provider
+    SeqProvider["Sequence Provider"]
+
+    %% Line handler gets sequence
+    LHN -->|Get Seq| SeqProvider
+    SeqProvider -->|Return Seq| LHN
+
+    %% Transformer and handler
+    Transformer["Message Transformer"]
+    LHN -->|Sequenced Msg| Transformer
+
+    %% Downstream components
+    TickPersistence["Tick Persistence Client"]
+    Aggregator["Market Data Aggregator"]
+
+    %% Transformer outputs
+    Transformer -->|Normalized Data| TickPersistence
+    Transformer -->|Normalized Data| Aggregator
+
+    %% Messaging layer
+    RabbitMQ["RabbitMQ"]
+    class RabbitMQ rabbitmq
+
+    %% Transport methods
+    RabbitMQ["RabbitMQ"]
+    FIX_Transport["FIX Gateway"]
+    REST_API["REST API"]
+    class RabbitMQ rabbitmq
+    class FIX_Transport fix
+    class REST_API rest
+
+    %% Connect aggregator to transport methods
+    Aggregator -->|Publish Data| RabbitMQ
+    Aggregator -->|FIX Messages| FIX_Transport
+    Aggregator -->|HTTP Endpoints| REST_API
+
+    %% Client section with horizontal layout
+    subgraph Clients ["Clients"]
+        direction LR
+        Client1["RabbitMQ Client"] --- Client2["FIX Client"] --- Client3["REST Client"]
+    end
+
+    %% Connect transport methods to clients
+    RabbitMQ -->|Subscribe to Topics| Client1
+    FIX_Transport -->|FIX Protocol| Client2
+    REST_API -->|HTTP/JSON| Client3
