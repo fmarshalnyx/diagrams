@@ -1,87 +1,66 @@
 flowchart TD
-classDef invisible fill=none,stroke=none;
+%% External Market Data Providers
+    A1(["Market Data Provider 1"])
+%%    A2(["Market Data Provider 2"])
 
-%% Invisible nodes to encourage vertical stacking
-topAnchor1[ ]:::invisible
-topAnchor2[ ]:::invisible
-topAnchor3[ ]:::invisible
-topAnchor4[ ]:::invisible
-topAnchor5[ ]:::invisible
+%% Group for Market Data Line Handler 1
+    subgraph Provider1_Group[Market Data Line Handler 1]
+        direction TB
+        B1[Market Data Line Handler 1]
+    end
 
-%% External Market Data Providers (top row)
-A1(["Market Data Provider 1"])
-A2(["Market Data Provider 2"])
+%% Group for Market Data Line Handler 2
+    %%subgraph Provider2_Group[Market Data Line Handler 2]
+        %%direction TB
+        %%B2[Market Data Line Handler 2]
+    %%end
 
-%% Group for Market Data Line Handler 1 (2nd row)
-subgraph Provider1_Group[Market Data Line Handler 1]
-direction TB
-B1[Market Data Line Handler 1]
-end
-subgraph Provider2_Group[Market Data Line Handler 2]
-direction TB
-B2[Market Data Line Handler 2]
-end
+%% Sequencer and Tick History Persistor in same row
+    subgraph Sequencer_Group[Sequencer]
+        direction TB
+        C1["Sequencer Primary"]
+        C2["Sequencer Hot Backup"]
+    end
 
-%% Sequencer (primary above backup) (3rd row)
-subgraph Sequencer_Group[Sequencer]
-direction TB
-C1["Sequencer Primary"]
-C2["Sequencer Hot Backup"]
-C1 -.-> C2
-end
+    subgraph Persistor_Group[Tick History Persistor]
+        direction TB
+        D[Tick History Persistor]
+        DB[(Tick Database)]
+        D -- "Persist to Tick DB" --> DB
+    end
 
-%% Tick History Persistor (4th row)
-subgraph Persistor_Group[Tick History Persistor]
-direction TB
-D[Tick History Persistor]
-DB[(Tick Database)]
-D -- "Persist to Tick DB" --> DB
-end
+%% Aggregator in its own row below, with in-memory cache as cloud
+    subgraph Aggregator_Group[Aggregator]
+        direction TB
+        E[Aggregator]
+        Cache(("In-Memory Cache"))
+        E -- "Persist to In-Memory Cache" --> Cache
+    end
 
-%% Aggregator in its own row below, with in-memory cache as cloud (5th row)
-subgraph Aggregator_Group[Aggregator]
-direction TB
-E[Aggregator]
-Cache(("In-Memory Cache"))
-E -- "Persist to In-Memory Cache" --> Cache
-end
+%% Internal Clients (no group)
+    F1[Internal Sequenced-MD RFQ/RFS client 1]
+    F2[Internal Sequenced-MD RFQ/RFS client 2]
+    F1 -- "Filter/Conflate Request" --> E
+    E -- "Publish Seq-MD" --> F1
+    F2 -- "Filter/Conflate Request" --> E
+    E -- "Publish Seq-MD" --> F2
 
-%% Internal Clients (bottom row)
-F1[Internal Sequenced-MD RFQ/RFS client 1]
-F2[Internal Sequenced-MD RFQ/RFS client 2]
-F1 -- "Filter/Conflate Request" --> E
-E -- "Publish Seq-MD" --> F1
-F2 -- "Filter/Conflate Request" --> E
-E -- "Publish Seq-MD" --> F2
-
-%% Anchor stacking: connect anchors and groups to enforce vertical order
-topAnchor1 -.-> A1 & A2
-A1 & A2 -.-> topAnchor2
-topAnchor2 -.-> B1 & B2
-B1 & B2 -.-> topAnchor3
-topAnchor3 -.-> C1
-C2 -.-> topAnchor4
-topAnchor4 -.-> D
-D -.-> topAnchor5
-topAnchor5 -.-> E
-E -.-> F1 & F2
-
-%% Flows from providers to handlers
-A1 -- "Market Data Ticks (FIX)" --> B1
-A1 -- "Admin Messages (FIX)" --> B1
-A2 -- "Market Data Ticks (FIX)" --> B2
-A2 -- "Admin Messages (FIX)" --> B2
+%% Flows from external providers to handlers
+    A1 -- "Market Data Ticks (FIX)" --> B1
+    A1 -- "Admin Messages (FIX)" --> B1
+    %%A2 -- "Market Data Ticks (FIX)" --> B2
+    %%A2 -- "Admin Messages (FIX)" --> B2
 
 %% Flows between groups
-B1 -- "Sequence Request" --> C1
-B2 -- "Sequence Request" --> C1
-C1 -- "Sequence ID" --> B1
-C1 -- "Sequence ID" --> B2
+    B1 -- "Sequence Request" --> C1
+    %%B2 -- "Sequence Request" --> C1
+    C1 -- "Sequence ID" --> B1
+    %%C1 -- "Sequence ID" --> B2
 
-B1 -- "Transform FIX + Seq to Seq-MD Model" --> B1
-B2 -- "Transform FIX + Seq to Seq-MD Model" --> B2
+    B1 -- "Transform FIX + Seq to Seq-MD Model" --> B1
+    %%B2 -- "Transform FIX + Seq to Seq-MD Model" --> B2
 
-B1 -- "Seq-MD" --> D
-B2 -- "Seq-MD" --> D
-B1 -- "Seq-MD" --> E
-B2 -- "Seq-MD" --> E
+    B1 -- "Seq-MD" --> D
+    %%B2 -- "Seq-MD" --> D
+    B1 -- "Seq-MD" --> E
+    %%B2 -- "Seq-MD" --> E
