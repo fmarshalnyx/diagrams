@@ -1,9 +1,150 @@
 <mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36" version="27.1.6">
   <diagram name="Page-1" id="WWB2ufQQQP7QxheeLGoW">
-    <mxGraphModel dx="1917" dy="1405" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="1713" dy="1295" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
+        <mxCell id="whDAAc5-y7LH5YjKpeto-1" value="Clients" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="36" y="779" width="305" height="358" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-2" value="Line Handlers" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="37" y="221" width="391" height="104" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-3" value="Market Data Providers" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="107" y="20" width="204" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-4" value="Market Data Flow with Multiple Transport Method" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="346" y="45" width="260" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-5" value="Provider N" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="142" y="57" width="134" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-6" value="Handler N" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="144" y="246" width="131" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-7" value="Sequence Provider" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="398" width="192" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-8" value="Message Transformer" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="262" y="398" width="209" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-9" value="Tick Persistence Client" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="165" y="525" width="223" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-10" value="Market Data Aggregator" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="438" y="525" width="229" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-11" value="RabbitMQ" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="95" y="652" width="129" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-12" value="FIX Gateway" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="478" y="804" width="149" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-13" value="REST API" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="601" y="931" width="121" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-14" value="RabbitMQ Client" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="71" y="804" width="176" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-15" value="FIX Client" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="127" y="931" width="129" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-16" value="REST Client" style="whiteSpace=wrap;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="152" y="1058" width="142" height="54" as="geometry" />
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-17" value="FIX" style="curved=1;startArrow=none;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-5" target="whDAAc5-y7LH5YjKpeto-6">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-18" value="Get Seq" style="curved=1;startArrow=none;endArrow=block;exitX=0.09;exitY=1;entryX=0.48;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-6" target="whDAAc5-y7LH5YjKpeto-7">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="107" y="325" />
+              <mxPoint x="107" y="362" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-19" value="Return Seq" style="curved=1;startArrow=none;endArrow=block;exitX=0.71;exitY=0;entryX=0.5;entryY=1;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-7" target="whDAAc5-y7LH5YjKpeto-6">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="209" y="362" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-20" value="Sequenced Msg" style="curved=1;startArrow=none;endArrow=block;exitX=1;exitY=0.9;entryX=0.5;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-6" target="whDAAc5-y7LH5YjKpeto-8">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="367" y="325" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-21" value="Normalized Data" style="curved=1;startArrow=none;endArrow=block;exitX=0.32;exitY=1;entryX=0.5;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-8" target="whDAAc5-y7LH5YjKpeto-9">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="277" y="489" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-22" value="Normalized Data" style="curved=1;startArrow=none;endArrow=block;exitX=0.88;exitY=1;entryX=0.5;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-8" target="whDAAc5-y7LH5YjKpeto-10">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="552" y="489" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-23" value="Publish Data" style="curved=1;startArrow=none;endArrow=block;exitX=0;exitY=0.84;entryX=0.49;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-10" target="whDAAc5-y7LH5YjKpeto-11">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="159" y="616" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-24" value="FIX Messages" style="curved=1;startArrow=none;endArrow=block;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-10" target="whDAAc5-y7LH5YjKpeto-12">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-25" value="HTTP Endpoints" style="curved=1;startArrow=none;endArrow=block;exitX=0.7;exitY=1;entryX=0.5;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-10" target="whDAAc5-y7LH5YjKpeto-13">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="662" y="616" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-26" value="" style="curved=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.39;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-14" target="whDAAc5-y7LH5YjKpeto-15">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="159" y="895" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-27" value="" style="curved=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.4;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-15" target="whDAAc5-y7LH5YjKpeto-16">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="191" y="1022" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-28" value="Subscribe to Topics" style="curved=1;startArrow=none;endArrow=block;exitX=0.49;exitY=1;entryX=0.5;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-11" target="whDAAc5-y7LH5YjKpeto-14">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-29" value="FIX Protocol" style="curved=1;startArrow=none;endArrow=block;exitX=0;exitY=0.77;entryX=0.6;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-12" target="whDAAc5-y7LH5YjKpeto-15">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="224" y="895" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="whDAAc5-y7LH5YjKpeto-30" value="HTTP/JSON" style="curved=1;startArrow=none;endArrow=block;exitX=0;exitY=0.68;entryX=0.6;entryY=0;rounded=0;" edge="1" parent="1" source="whDAAc5-y7LH5YjKpeto-13" target="whDAAc5-y7LH5YjKpeto-16">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="256" y="1022" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
       </root>
     </mxGraphModel>
   </diagram>
