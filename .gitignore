@@ -1,2 +1,5 @@
-*.1
+*.swp
+*.[0-9]
 .idea/**
+.DS_Store
+.*.bkp
