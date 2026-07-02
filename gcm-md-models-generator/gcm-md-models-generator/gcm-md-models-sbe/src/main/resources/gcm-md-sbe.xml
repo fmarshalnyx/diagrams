@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example GCM market-data SBE schema.
+  Replace this file with your real gcm-md-sbe.xml; the pipeline regenerates
+  codecs, JSON Schemas, AsyncAPI doc and translators from whatever is here.
+  The example deliberately exercises: fixed char array, timestamp, composites,
+  an optional int64, a bitset, an enum, a repeating group and var-length strings.
+-->
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="com.gcm.md.models.sbe"
+                   id="1"
+                   version="0"
+                   semanticVersion="1.0"
+                   description="GCM market data messages"
+                   byteOrder="littleEndian">
+  <types>
+    <composite name="messageHeader" description="Message identifiers and length of message root">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="templateId"  primitiveType="uint16"/>
+      <type name="schemaId"    primitiveType="uint16"/>
+      <type name="version"     primitiveType="uint16"/>
+    </composite>
+    <composite name="groupSizeEncoding" description="Repeating group dimensions">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="numInGroup"  primitiveType="uint16"/>
+    </composite>
+    <composite name="varStringEncoding" description="Variable length UTF-8 string">
+      <type name="length"  primitiveType="uint32" maxValue="1073741824"/>
+      <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+    </composite>
+    <composite name="decimal64" description="Scaled decimal: value = mantissa * 10^exponent">
+      <type name="mantissa" primitiveType="int64"/>
+      <type name="exponent" primitiveType="int8"/>
+    </composite>
+
+    <type name="symbol_t"      primitiveType="char"   length="12" characterEncoding="ASCII" description="Instrument symbol"/>
+    <type name="timestampNs_t" primitiveType="uint64" semanticType="UTCTimestamp" description="Epoch nanoseconds"/>
+
+    <enum name="Side" encodingType="uint8">
+      <validValue name="BUY"  description="Buy side">1</validValue>
+      <validValue name="SELL" description="Sell side">2</validValue>
+    </enum>
+
+    <set name="QuoteFlags" encodingType="uint8">
+      <choice name="implied"    description="Implied quote">0</choice>
+      <choice name="indicative" description="Indicative, not firm">1</choice>
+      <choice name="snapshot"   description="Snapshot rather than delta">2</choice>
+    </set>
+  </types>
+
+  <sbe:message name="QuoteUpdate" id="1" description="Top of book / depth quote update">
+    <field name="symbol"       id="1" type="symbol_t"/>
+    <field name="transactTime" id="2" type="timestampNs_t"/>
+    <field name="bid"          id="3" type="decimal64"/>
+    <field name="ask"          id="4" type="decimal64"/>
+    <field name="lastQty"      id="5" type="int64" presence="optional" description="Quantity of last trade, if any"/>
+    <field name="flags"        id="6" type="QuoteFlags"/>
+    <group name="priceLevels" id="10" dimensionType="groupSizeEncoding" description="Depth levels">
+      <field name="level" id="11" type="uint8"/>
+      <field name="price" id="12" type="decimal64"/>
+      <field name="qty"   id="13" type="int64"/>
+    </group>
+    <data name="venue" id="20" type="varStringEncoding" description="Originating venue MIC"/>
+  </sbe:message>
+
+  <sbe:message name="TradeUpdate" id="2" description="Trade print">
+    <field name="symbol"        id="1" type="symbol_t"/>
+    <field name="transactTime"  id="2" type="timestampNs_t"/>
+    <field name="price"         id="3" type="decimal64"/>
+    <field name="qty"           id="4" type="int64"/>
+    <field name="aggressorSide" id="5" type="Side"/>
+    <data name="tradeId" id="20" type="varStringEncoding"/>
+  </sbe:message>
+</sbe:messageSchema>
