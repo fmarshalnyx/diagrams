@@ -8,7 +8,7 @@ Maven multi-module project that turns an SBE schema (`gcm-md-sbe.xml`) into:
    - an AsyncAPI 3.0 document describing the NATS channels,
    - one zero-allocation `<Message>JsonTranslator` class per message, plus a `GcmMdTranslators` registry keyed by templateId.
 3. **`gcm-md-models-json`** — compiles the generated translators together with the handwritten runtime (`JsonTranslator` interface, `JsonWriter`), and packages the schemas + AsyncAPI doc as classpath resources. Round-trip tests live here.
-4. **`gcm-md-models-json-bridge`** — a NATS service that subscribes `TICK_SBE.>`, translates each frame, and republishes JSON on `TICK_JSON.<same suffix>`. Built as a runnable shaded jar.
+4. **`gcm-md-models-json-bridge`** — a NATS service that subscribes `TICKS_SBE.>`, translates each frame, and republishes JSON on `TICKS_JSON.<same suffix>`. Built as a runnable shaded jar.
 
 ## Layout
 
@@ -41,8 +41,8 @@ java -jar gcm-md-models-json-bridge/target/gcm-md-models-json-bridge-1.0.0-SNAPS
 mvn -pl gcm-md-models-json-bridge exec:java
 ```
 
-Environment: `NATS_URL` (default `nats://localhost:4222`), `IN_PREFIX` (default `TICK_SBE`),
-`OUT_PREFIX` (default `TICK_JSON`).
+Environment: `NATS_URL` (default `nats://localhost:4223`), `IN_PREFIX` (default `TICKS_SBE`),
+`OUT_PREFIX` (default `TICKS_JSON`).
 
 ## Swapping in your real schema
 

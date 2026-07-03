@@ -20,11 +20,11 @@ import java.util.concurrent.CountDownLatch;
 /**
  * SBE-to-JSON bridge.
  *
- * Subscribes to {IN_PREFIX}.&gt; (default TICK_SBE.&gt;), decodes the SBE message header,
+ * Subscribes to {IN_PREFIX}.&gt; (default TICKS_SBE.&gt;), decodes the SBE message header,
  * looks up the generated translator by templateId, writes the JSON bytes and republishes
- * on the same subject with the prefix swapped to {OUT_PREFIX} (default TICK_JSON), e.g.
+ * on the same subject with the prefix swapped to {OUT_PREFIX} (default TICKS_JSON), e.g.
  *
- *   TICK_SBE.QuoteUpdate.EURUSD  -&gt;  TICK_JSON.QuoteUpdate.EURUSD
+ *   TICKS_SBE.QuoteUpdate.EURUSD  -&gt;  TICKS_JSON.QuoteUpdate.EURUSD
  *
  * Threading: a single NATS dispatcher delivers messages on one thread, so the decoder
  * flyweights, translators and buffers held by this handler are thread-confined. To scale,
@@ -36,9 +36,9 @@ import java.util.concurrent.CountDownLatch;
  * logged rather than decoded as the subject-implied type.
  *
  * Configuration via environment variables:
- *   NATS_URL   (default nats://localhost:4222)
- *   IN_PREFIX  (default TICK_SBE)
- *   OUT_PREFIX (default TICK_JSON)
+ *   NATS_URL   (default nats://localhost:4223)
+ *   IN_PREFIX  (default TICKS_SBE)
+ *   OUT_PREFIX (default TICKS_JSON)
  */
 public final class BridgeMain implements MessageHandler
 {
@@ -114,7 +114,7 @@ public final class BridgeMain implements MessageHandler
         }
     }
 
-    /** Second token of the subject, e.g. "QuoteUpdate" in TICK_SBE.QuoteUpdate.EURUSD; null if absent. */
+    /** Second token of the subject, e.g. "QuoteUpdate" in TICKS_SBE.QuoteUpdate.EURUSD; null if absent. */
     private static String messageNameSegment(final String subject)
     {
         final int first = subject.indexOf('.');
@@ -128,9 +128,9 @@ public final class BridgeMain implements MessageHandler
 
     public static void main(final String[] args) throws Exception
     {
-        final String natsUrl = env("NATS_URL", "nats://localhost:4222");
-        final String inPrefix = env("IN_PREFIX", "TICK_SBE");
-        final String outPrefix = env("OUT_PREFIX", "TICK_JSON");
+        final String natsUrl = env("NATS_URL", "nats://localhost:4223");
+        final String inPrefix = env("IN_PREFIX", "TICKS_SBE");
+        final String outPrefix = env("OUT_PREFIX", "TICKS_JSON");
 
         final Options options = new Options.Builder()
             .server(natsUrl)

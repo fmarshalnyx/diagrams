@@ -11,7 +11,7 @@
 
   <artifactId>gcm-md-models-json-bridge</artifactId>
   <name>GCM MD Models - JSON bridge service</name>
-  <description>Subscribes TICK_SBE.&gt;, translates SBE to JSON, republishes on TICK_JSON.*</description>
+  <description>Subscribes TICKS_SBE.&gt;, translates SBE to JSON, republishes on TICKS_JSON.*</description>
 
   <dependencies>
     <dependency><groupId>com.gcm.md</groupId><artifactId>gcm-md-models-json</artifactId><version>${project.version}</version></dependency>
