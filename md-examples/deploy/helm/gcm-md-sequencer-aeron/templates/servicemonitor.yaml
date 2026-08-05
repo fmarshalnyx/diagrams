@@ -1,0 +1,70 @@
+{{- if .Values.serviceMonitor.enabled }}
+{{- if .Values.clusterNode.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gcm-md.clusterNode.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+selector:
+  matchLabels:
+    app.kubernetes.io/component: cluster-node
+endpoints:
+  # Not /actuator/prometheus - cluster-node has no Spring dependency (design §3.3), so this is
+  # MetricsHttpServer's own minimal JDK HttpServer endpoint instead (design §17).
+  - port: metrics
+    path: /metrics
+    interval: 15s
+{{- end }}
+{{- if .Values.natsBridge.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gcm-md.natsBridge.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+selector:
+  matchLabels:
+    app.kubernetes.io/component: nats-bridge
+endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 15s
+{{- end }}
+{{- if .Values.lineHandlerTemplate.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gcm-md.lineHandlerTemplate.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+selector:
+  matchLabels:
+    app.kubernetes.io/component: line-handler-template
+endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 15s
+{{- end }}
+{{- if .Values.mockUpstreamSource.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gcm-md.mockUpstreamSource.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+selector:
+  matchLabels:
+    app.kubernetes.io/component: mock-upstream-source
+endpoints:
+  - port: http
+    # mock_upstream_gap_total/mock_upstream_duplicate_total scraped here should stay permanently
+    # zero — see the module's own README for the "nonzero means a real sequencer bug" contract.
+    path: /actuator/prometheus
+    interval: 15s
+{{- end }}
+{{- end }}

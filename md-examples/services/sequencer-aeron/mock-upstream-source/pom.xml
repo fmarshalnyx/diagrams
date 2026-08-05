@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>mock-upstream-source</artifactId>
+    <packaging>jar</packaging>
+
+    <properties>
+        <!-- Overrides the parent POM's default (true) - this is one of the 4 modules that
+             actually wants an image built. A global -Djib.skip=true (the build/integration CI
+             jobs use this) still wins over this module-level default, per normal Maven property
+             precedence - see the parent POM's own comment on why this is a property and not a
+             literal <skip> value in this module's <configuration> below. -->
+        <jib.skip>false</jib.skip>
+    </properties>
+
+    <!-- services/sequencer-aeron/mock-upstream-source (implementation-steps.md Milestone 5B):
+         persistent Spring Boot service, deployable independently of
+         services/sequencer-aeron/line-handler-template, that continuously generates synthetic
+         upstream traffic (steady/bursty/gaps/duplicates) and continuously verifies contiguity/
+         no-duplicates on the sequencer's observed final egress via metrics. Fully replaces
+         services/sequencer-aeron/loadgen (retirement is Milestone 5B.4, gated on
+         40-smoke-test.sh/50-failover-drill.sh switching over first). -->
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- Actuator alone has no embedded server; web is required for the /actuator/health
+             HTTP endpoint readiness/liveness probes target (see nats-bridge's identical comment). -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>md-models-sbe</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>mock-upstream-source</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>exec</classifier>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Container image (design §10, §11). -->
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>build-image</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>dockerBuild</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!-- <skip> deliberately not set here - inherited from pluginManagement as
+                         ${jib.skip}, resolved via this module's own <properties> above. -->
+                    <from>
+                        <image>eclipse-temurin:25-jre-alpine</image>
+                    </from>
+                    <to>
+                        <image>gcm-md/mock-upstream-source</image>
+                        <tags>
+                            <tag>local</tag>
+                        </tags>
+                    </to>
+                    <container>
+                        <mainClass>gcm.md.mockupstreamsource.MockUpstreamSourceApplication</mainClass>
+                        <jvmFlags>
+                            <jvmFlag>-XX:+UseZGC</jvmFlag>
+                            <jvmFlag>-XX:+AlwaysPreTouch</jvmFlag>
+                        </jvmFlags>
+                        <ports>
+                            <port>8080</port>
+                        </ports>
+                        <user>1000:1000</user>
+                    </container>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

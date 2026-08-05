@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>md-sequencer</artifactId>
+    <packaging>jar</packaging>
+
+    <!-- Phase-1 sequencer (services/sequencer-nats). Imported per design doc §3.2 /
+         milestone A0; egress classes remain in-tree here until Milestone 0.3 extracts
+         them into the sibling libs/nats-egress module. -->
+
+    <dependencies>
+        <!-- Spring: config binding, lifecycle, actuator only; never on the hot path -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- Hot-path binary access -->
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+
+        <!-- NATS ingress/egress + KV block leasing -->
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+        </dependency>
+
+        <!-- Destination channels (§3.2/§9): shared source, also compiled against by nats-bridge -->
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>nats-egress</artifactId>
+        </dependency>
+
+        <!-- Off-thread latency percentile tracking (schema §13) -->
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+        </dependency>
+
+        <!-- Kubernetes Lease-based leader election -->
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-httpclient-jdk</artifactId>
+        </dependency>
+
+        <!-- Test only: SBE codecs for offset-contract verification, never on the hot path -->
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>md-models-sbe</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>md-sequencer</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Keep the plain slim jar as the main artifact so sequencer-bench can
+                                 depend on it normally; the executable jar becomes a classified
+                                 secondary artifact (classes would otherwise be nested under
+                                 BOOT-INF/ and invisible to other reactor modules). -->
+                            <classifier>exec</classifier>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

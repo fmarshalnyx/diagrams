@@ -1,0 +1,28 @@
+# AWS dev environment profile. Activate with SPRING_PROFILES_ACTIVE=dev (set by
+# k8s/overlays/dev). Replace the NATS URL below with the real endpoint for the dev NATS cluster —
+# see md-sequencer/k8s/README.md for the full list of environment-specific values to fill in.
+
+sequencer:
+  ingress:
+    nats:
+      url: nats://nats.dev.md-platform.internal:4222
+  egress:
+    nats:
+      url: nats://nats.dev.md-platform.internal:4222
+  leadership:
+    lease-namespace: md-sequencer-dev
+
+management:
+  metrics:
+    tags:
+      environment: dev
+  endpoint:
+    health:
+      show-details: always
+
+info:
+  environment: dev
+
+logging:
+  level:
+    gcm.md.sequencer: DEBUG

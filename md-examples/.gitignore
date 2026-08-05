@@ -1,0 +1,60 @@
+target/
+*.[0-9]
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IntelliJ IDEA ###
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+*.iws
+*.iml
+*.ipr
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# Top-level build/ is a real Maven module directory (build/gcm-md-parent/, the parent POM every
+# other module in this reactor inherits from), not a build-output dir - it must never be
+# blanket-ignored. This used to be a bare `build/` pattern (matches "build" at any depth,
+# including the repo root) with a `!/build/gcm-md-parent/` negation meant to carve out an
+# exception - which never worked: git will not re-include a path whose parent directory is
+# already excluded, no matter how the negation is written, and `build/` excludes /build/ itself.
+# Confirmed the hard way: a fresh checkout (gitlab-ci-local, simulating a real CI runner) failed
+# every single job with "Non-resolvable parent POM" because build/gcm-md-parent/pom.xml was
+# never actually tracked by git at all. Anchored + one-level (leading /, trailing /*) so this
+# only affects direct children of the top-level build/, not any nested build/ dir elsewhere in
+# the tree (still caught by the recursive pattern below, which - unlike the old one - correctly
+# excludes the top-level path since it requires at least one path segment before "build/").
+/build/*
+!/build/gcm-md-parent/
+**/*/build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+### gitlab-ci-local ###
+# Per-developer local CI-simulation scratch state (cloned repo snapshots, expanded YAML, job
+# output) - never source, never meant to be shared. The tool already self-excludes its own
+# contents via .gitlab-ci-local/.gitignore; this just keeps the directory itself out of `git add`.
+/.gitlab-ci-local/

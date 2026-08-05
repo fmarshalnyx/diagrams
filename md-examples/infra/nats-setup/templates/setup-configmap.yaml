@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-setup-script
+  labels:
+    app.kubernetes.io/part-of: nats-setup
+data:
+  setup.sh: |
+    #!/bin/sh
+    set -eu
+    URL="nats://nats:4222"
+
+    echo "Waiting for NATS to be reachable at $URL..."
+    for i in $(seq 1 60); do
+      if nats server check connection -s "$URL" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 2
+    done
+
+    {{- range .Values.setupJob.streams }}
+    echo "Ensuring stream {{ .name }} exists..."
+    if ! nats stream info {{ .name }} -s "$URL" >/dev/null 2>&1; then
+      nats stream add {{ .name }} --subjects "{{ .subjects }}" --defaults -s "$URL"
+    else
+      echo "{{ .name }} already exists, skipping (idempotent)."
+    fi
+    {{- end }}
+
+    {{- range .Values.setupJob.kvBuckets }}
+    echo "Ensuring KV bucket {{ . }} exists..."
+    if ! nats kv info {{ . }} -s "$URL" >/dev/null 2>&1; then
+      nats kv add {{ . }} -s "$URL"
+    else
+      echo "{{ . }} already exists, skipping (idempotent)."
+    fi
+    {{- end }}
+
+    echo "nats-setup complete."

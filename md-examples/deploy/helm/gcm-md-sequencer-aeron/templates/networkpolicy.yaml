@@ -1,0 +1,59 @@
+{{- if and .Values.networkPolicy.enabled .Values.clusterNode.enabled }}
+# design §10: "No ClusterIP Service may ever front Aeron traffic" — this policy is the
+# enforcement mechanism, restricting cluster-node's Aeron ports to direct pod-to-pod UDP from
+# the other components in this chart only (never from arbitrary namespace traffic).
+#
+# line-handler-template connects to cluster-node directly now (no more ingress-shim relaying
+# through this chart's own pods) — allowed below when lineHandlerTemplate.enabled and its
+# ingressTransport is aeron. A real (non-template) line handler deployed outside this chart, in
+# a different namespace/labels, would need its own matching NetworkPolicy entry — not covered
+# here, since this chart has no way to know that deployment's actual labels.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gcm-md.clusterNode.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-node
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: cluster-node
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: cluster-node
+        {{- if .Values.natsBridge.enabled }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats-bridge
+        {{- end }}
+        {{- if and .Values.lineHandlerTemplate.enabled (eq .Values.lineHandlerTemplate.ingressTransport "aeron") }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: line-handler-template
+        {{- end }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.clusterNode.ports.client }}
+        - protocol: UDP
+          port: {{ .Values.clusterNode.ports.member }}
+        - protocol: UDP
+          port: {{ .Values.clusterNode.ports.log }}
+        - protocol: UDP
+          port: {{ .Values.clusterNode.ports.transfer }}
+        - protocol: UDP
+          port: {{ .Values.clusterNode.ports.archive }}
+        - protocol: UDP
+          port: 9070
+    # Metrics scraping (design §17) is left unrestricted by source: Prometheus typically runs in
+    # its own namespace with its own labels this chart has no way to know (same reasoning as the
+    # line-handler-template comment above), and a metrics-only TCP port carries nothing sensitive
+    # enough to justify the maintenance cost of a tight, likely-to-drift allowlist.
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.clusterNode.ports.metrics }}
+{{- end }}

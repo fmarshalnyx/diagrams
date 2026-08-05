@@ -1,0 +1,76 @@
+{{- if .Values.mockUpstreamSource.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gcm-md.mockUpstreamSource.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mock-upstream-source
+spec:
+  replicas: {{ .Values.mockUpstreamSource.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: mock-upstream-source
+  template:
+    metadata:
+      labels:
+        {{- include "gcm-md.labels" . | nindent 8 }}
+        app.kubernetes.io/component: mock-upstream-source
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.mockUpstreamSource.serverPort }}"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      serviceAccountName: {{ include "gcm-md.mockUpstreamSource.name" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mock-upstream-source
+          image: "{{ .Values.mockUpstreamSource.image.repository }}:{{ .Values.mockUpstreamSource.image.tag }}"
+          imagePullPolicy: {{ .Values.mockUpstreamSource.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "file:/workspace/config/"
+            - name: MOCK_UPSTREAM_SOURCE_URL
+              value: {{ .Values.nats.url | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.mockUpstreamSource.serverPort }}
+          resources:
+            {{- toYaml .Values.mockUpstreamSource.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /workspace/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gcm-md.mockUpstreamSource.name" . }}-config
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcm-md-sequencer
+spec:
+  template:
+    spec:
+      # Same tier as prod: DR must be able to actually take the load if it's ever promoted.
+      nodeSelector:
+        cpuManagerPolicy: static

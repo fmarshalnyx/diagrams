@@ -1,0 +1,149 @@
+# Default values for gcm-md-sequencer-aeron (design §10). Environment overlays in
+# environments/<env>/values.yaml override only what differs; a commit of this repo plus one
+# overlay fully determines what's deployed.
+
+clusterNode:
+  enabled: true
+  replicas: 1 # local default (design §11); AWS envs set 3 with topologySpreadConstraints on zone
+  image:
+    repository: gcm-md/cluster-node
+    tag: local
+    pullPolicy: IfNotPresent
+  # Not yet implemented (see CLAUDE.md): cluster-node currently only runs its single-member
+  # localhost-default profile (ClusterNodeConfig.localSingleMember()) regardless of replicas —
+  # environment-variable/multi-member config wiring is a documented gap, tracked for when
+  # replicas > 1 is actually exercised. Safe for replicas: 1 today.
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  devShmSizeLimit: 512Mi
+  persistence:
+    enabled: false # local default: emptyDir. Set true + storageClassName for a real PVC.
+    size: 2Gi
+    storageClassName: ""
+  ports:
+    client: 9010
+    member: 9020
+    log: 9030
+    transfer: 9040
+    archive: 9050
+    # design §17: MetricsHttpServer's /metrics scrape endpoint (CLUSTER_METRICS_PORT env var,
+    # code default 9100 if this were ever left unset). TCP, not UDP like the Aeron ports above.
+    metrics: 9100
+  aeron:
+    # design §5.2: externalized per environment - 1408 for Docker Desktop's default bridge MTU,
+    # 8k for AWS jumbo frames. Environment overlays should set this explicitly rather than rely
+    # on this chart default.
+    mtuLength: 1408
+    # How long an Aeron client tolerates not hearing from its co-located embedded driver (and vice
+    # versa) before assuming it died - Aeron's own out-of-the-box default. Real incident, not
+    # hypothetical: on a resource-constrained shared host, a GC pause or scheduling delay past
+    # this window makes the consensus module's own internal Aeron client conclude its driver is
+    # gone, which triggers a clean, silent, exit-0 self-shutdown (see ClusterNodeLauncher's own
+    # Javadoc) - 97 restarts over 25 hours on local Docker Desktop, zero application-level log
+    # evidence why, until this was root-caused. Left at Aeron's default here (fast genuine-failure
+    # detection matters for a low-latency sequencer); environments/local/values.yaml raises it
+    # instead of raising the shared default, which would slow down detection everywhere.
+    driverTimeoutMs: 10000
+  # No readiness HTTP endpoint: cluster-node doesn't expose one yet (design §10's "tiny HTTP
+  # endpoint" for readiness is not implemented — see CLAUDE.md). Probes are process-liveness
+  # only until that lands. (Separately, MetricsHttpServer's /metrics *is* implemented and now
+  # wired up below — that one's for Prometheus scraping, not readiness.)
+  # design §5.1 cluster.sources: "name:sourceId:credential" triples separated by ";". Must
+  # match the credentials whichever line handlers are configured for the Aeron transport use
+  # (implementation-steps.md Milestone 5, revised — no ingress-shim). line-handler-template's
+  # own credential (lineHandlerTemplate.aeronCredential below) must match the "line-handler"
+  # entry here — the two are configured to agree but, like the rest of this chart's
+  # line-handler-facing config, share no code (libs/* can't depend on services/*).
+  sources: "line-handler:2:line-handler-token"
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+natsBridge:
+  enabled: true
+  replicas: 1
+  image:
+    repository: gcm-md/nats-bridge
+    tag: local
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+  serverPort: 8080
+  configYaml: |
+    nats-bridge: {}
+
+lineHandlerTemplate:
+  # Reference implementation (implementation-steps.md Milestone 5B) — deployed independently of
+  # mock-upstream-source, its own image/replicas/toggle, per the "separate deployable services"
+  # decision. Not meant to run against a real feed; see the module's own README.
+  enabled: true
+  replicas: 1
+  image:
+    repository: gcm-md/line-handler-template
+    tag: local
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+  serverPort: 8080
+  # aeron | nats — see libs/ingress-transport's package-info for why this is a config choice
+  # rather than a staged migration through a shim service.
+  ingressTransport: aeron
+  # Must match an entry in clusterNode.sources above.
+  aeronCredential: line-handler-token
+  configYaml: |
+    line-handler:
+      upstream:
+        stream: MOCK_UPSTREAM
+        subject: upstream.mock.marketdata
+
+mockUpstreamSource:
+  # Persistent generate+verify service (implementation-steps.md Milestone 5B) — deployed
+  # independently of line-handler-template. Replaced sequencer-loadgen, retired in Milestone 5B.4.
+  enabled: true
+  replicas: 1
+  image:
+    repository: gcm-md/mock-upstream-source
+    tag: local
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+  serverPort: 8080
+  configYaml: |
+    mock-upstream-source:
+      stream: MOCK_UPSTREAM
+      subject: upstream.mock.marketdata
+      egress-subject: md.sequenced
+
+networkPolicy:
+  # design §10: "No ClusterIP Service may ever front Aeron traffic" — enforced by the headless
+  # Service (clusterIP: None) plus this policy permitting only direct pod-to-pod UDP on the
+  # Aeron port range between clusterNode pods.
+  enabled: true
+
+serviceMonitor:
+  # Off by default: requires the Prometheus Operator CRD, which a bare Docker Desktop cluster
+  # doesn't have. Enable in environments that run the Prometheus Operator.
+  enabled: false
+
+nats:
+  url: nats://nats.gcm-md-local.svc.cluster.local:4222

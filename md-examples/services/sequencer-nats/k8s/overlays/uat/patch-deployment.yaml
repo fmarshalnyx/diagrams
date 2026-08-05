@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcm-md-sequencer
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: sequencer
+          env:
+            - name: JDK_JAVA_OPTIONS
+              value: >-
+                -XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch
+                -Xms2g -Xmx4g
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi

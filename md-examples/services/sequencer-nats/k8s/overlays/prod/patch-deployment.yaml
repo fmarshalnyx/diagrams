@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcm-md-sequencer
+spec:
+  template:
+    spec:
+      # No CPU limits throttling surprises: this node pool must pin exclusive cores (spec §14).
+      # Not applied to local/dev/uat, which don't provision a static cpuManagerPolicy node pool.
+      nodeSelector:
+        cpuManagerPolicy: static

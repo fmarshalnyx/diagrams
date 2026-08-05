@@ -1,0 +1,130 @@
+{{- if .Values.clusterNode.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "gcm-md.clusterNode.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-node
+spec:
+  serviceName: {{ include "gcm-md.clusterNode.name" . }}
+  replicas: {{ .Values.clusterNode.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: cluster-node
+  template:
+    metadata:
+      labels:
+        {{- include "gcm-md.labels" . | nindent 8 }}
+        app.kubernetes.io/component: cluster-node
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.clusterNode.ports.metrics }}"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: {{ include "gcm-md.clusterNode.name" . }}
+      # >= snapshot + drain time (design §10); ClusteredServiceContainer needs to shut down
+      # cleanly, not be killed mid-write.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cluster-node
+          image: "{{ .Values.clusterNode.image.repository }}:{{ .Values.clusterNode.image.tag }}"
+          imagePullPolicy: {{ .Values.clusterNode.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: client
+              containerPort: {{ .Values.clusterNode.ports.client }}
+              protocol: UDP
+            - name: member
+              containerPort: {{ .Values.clusterNode.ports.member }}
+              protocol: UDP
+            - name: log
+              containerPort: {{ .Values.clusterNode.ports.log }}
+              protocol: UDP
+            - name: transfer
+              containerPort: {{ .Values.clusterNode.ports.transfer }}
+              protocol: UDP
+            - name: archive
+              containerPort: {{ .Values.clusterNode.ports.archive }}
+              protocol: UDP
+            - name: egress
+              containerPort: 9070
+              protocol: UDP
+            - name: metrics
+              containerPort: {{ .Values.clusterNode.ports.metrics }}
+              protocol: TCP
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # A real pod DNS name (headless Service required — design §5.2, §10) rather than
+            # localhost, so nats-bridge and any Aeron-transport line handler in other pods can
+            # actually reach this member.
+            - name: CLUSTER_NODE_HOST
+              value: "$(POD_NAME).{{ include "gcm-md.clusterNode.name" . }}.{{ .Release.Namespace }}.svc.cluster.local"
+            - name: CLUSTER_DATA_DIR
+              value: /data
+            - name: CLUSTER_SOURCES
+              value: {{ .Values.clusterNode.sources | quote }}
+            - name: CLUSTER_MTU_LENGTH
+              value: {{ .Values.clusterNode.aeron.mtuLength | quote }}
+            - name: CLUSTER_DRIVER_TIMEOUT_MS
+              value: {{ .Values.clusterNode.aeron.driverTimeoutMs | quote }}
+            - name: CLUSTER_METRICS_PORT
+              value: {{ .Values.clusterNode.ports.metrics | quote }}
+            {{- if gt (int .Values.clusterNode.replicas) 1 }}
+            # Design §10: identical on every pod, rendered once from replicas + this Service's
+            # own per-pod DNS scheme (see the membersList helper's own comment). Absent entirely
+            # for replicas=1, so ClusterNodeLauncher falls through to today's unchanged
+            # singleMember(...) path — this block is strictly additive.
+            - name: CLUSTER_MEMBERS
+              value: {{ include "gcm-md.clusterNode.membersList" . | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.clusterNode.resources | nindent 12 }}
+          # No HTTP endpoint to probe yet (see values.yaml comment) — process liveness only.
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "ClusterNodeLauncher"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: dev-shm
+              mountPath: /dev/shm
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: dev-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.clusterNode.devShmSizeLimit }}
+        {{- if not .Values.clusterNode.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.clusterNode.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.clusterNode.persistence.storageClassName }}
+        storageClassName: {{ .Values.clusterNode.persistence.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.clusterNode.persistence.size }}
+  {{- end }}
+{{- end }}

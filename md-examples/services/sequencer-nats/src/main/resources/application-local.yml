@@ -1,0 +1,31 @@
+# Local development profile: Kubernetes running in Docker Desktop.
+#
+# Activate with SPRING_PROFILES_ACTIVE=local (already set by k8s/overlays/local). NATS runs as an
+# in-cluster pod deployed alongside the sequencer (see k8s/overlays/local/nats.yaml) rather than a
+# shared environment cluster, so the short in-namespace service name resolves fine as-is — this
+# file exists mainly to make that intent explicit and to tag metrics/info as "local".
+
+sequencer:
+  ingress:
+    nats:
+      url: nats://nats:4222
+  egress:
+    nats:
+      url: nats://nats:4222
+  leadership:
+    lease-namespace: md-sequencer-local
+
+management:
+  metrics:
+    tags:
+      environment: local
+  endpoint:
+    health:
+      show-details: always
+
+info:
+  environment: local
+
+logging:
+  level:
+    gcm.md.sequencer: DEBUG

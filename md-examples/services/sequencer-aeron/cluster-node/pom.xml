@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>cluster-node</artifactId>
+    <packaging>jar</packaging>
+
+    <properties>
+        <!-- Overrides the parent POM's default (true) - this is one of the 4 modules that
+             actually wants an image built. A global -Djib.skip=true (the build/integration CI
+             jobs use this) still wins over this module-level default, per normal Maven property
+             precedence - see the parent POM's own comment on why this is a property and not a
+             literal <skip> value in this module's <configuration> below. -->
+        <jib.skip>false</jib.skip>
+    </properties>
+
+    <!-- services/sequencer-aeron/cluster-node (design §5): one deployable image running, in a
+         single JVM, an embedded ClusteredMediaDriver (media driver + Archive + consensus module)
+         and the ClusteredServiceContainer hosting SequencerClusteredService, the phase-2
+         equivalent of phase-1's SequencerPipeline. No Spring, no jnats, no Kubernetes client
+         (design §3.3, §5) — embeds libs/sequencer-core directly. -->
+
+    <dependencies>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>sequencer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-all</artifactId>
+        </dependency>
+        <!-- Design §17 (Milestone 10): metrics only, no Spring — Micrometer itself has no Spring
+             dependency, so this doesn't trip the no-Spring enforcer rule below. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Design §12.3: wall-clock/randomness ban for SequencerClusteredService. Not shared
+             with libs/architecture-tests, which may not depend on services/* (design §3.3). -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- §3.3: the no-Spring rule is managed centrally in build/gcm-md-parent's
+                 pluginManagement (bare declaration activates it); the jnats/Kubernetes-client
+                 ban below is specific to this module alone (unlike the libs/* rules, no other
+                 module needs it — nats-egress legitimately depends on jnats), so it's inline. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-cluster-node-no-jnats-or-k8s-client-dependency</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>io.nats:jnats</exclude>
+                                        <exclude>io.fabric8:kubernetes-client</exclude>
+                                        <exclude>io.fabric8:kubernetes-httpclient-jdk</exclude>
+                                    </excludes>
+                                    <message>cluster-node must not depend on jnats or a Kubernetes client (design §3.3).</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Container image (design §10, §11): daemonless jib:build in CI, jib:dockerBuild
+                 loads straight into Docker Desktop's daemon for local use — no registry needed
+                 since Docker Desktop's Kubernetes shares that same daemon's image store. -->
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <!-- Bound to package (goal, not just configuration): invoking jib:dockerBuild as a
+                     bare CLI goal across the reactor applies it to every module, including ones
+                     with no jib config at all, which breaks on their default base-image guess.
+                     Binding it here means a plain `mvn package` builds this module's image, and
+                     other modules are unaffected either way. -->
+                <executions>
+                    <execution>
+                        <id>build-image</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>dockerBuild</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!-- <skip> deliberately not set here - inherited from pluginManagement as
+                         ${jib.skip}, resolved via this module's own <properties> above. -->
+                    <from>
+                        <image>eclipse-temurin:25-jre-alpine</image>
+                    </from>
+                    <to>
+                        <image>gcm-md/cluster-node</image>
+                        <tags>
+                            <tag>local</tag>
+                        </tags>
+                    </to>
+                    <container>
+                        <mainClass>gcm.md.sequencer.cluster.ClusterNodeLauncher</mainClass>
+                        <!-- JDK 25: generational is ZGC's only mode (ZGenerational removed in 24), so
+                             -XX:+UseZGC alone suffices — unlike phase-1's JDK-21-era flag set (§14). -->
+                        <jvmFlags>
+                            <jvmFlag>-XX:+UseZGC</jvmFlag>
+                            <jvmFlag>-XX:+AlwaysPreTouch</jvmFlag>
+                        </jvmFlags>
+                        <ports>
+                            <port>9010</port>
+                            <port>9020</port>
+                            <port>9030</port>
+                            <port>9040</port>
+                            <port>9050</port>
+                        </ports>
+                        <user>1000:1000</user>
+                    </container>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

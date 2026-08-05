@@ -1,0 +1,28 @@
+# AWS production DR environment profile — a separate region/cluster from prod, not a replica of
+# it. Activate with SPRING_PROFILES_ACTIVE=prod-dr (set by k8s/overlays/prod-dr). Replace the NATS
+# URL below with the real endpoint for the DR-region NATS cluster; it must be independent
+# infrastructure from prod's (see application-prod.yml's note, and md-sequencer/k8s/README.md).
+#
+# Leader election, sequence-block leasing, and the KV bucket are all scoped to this cluster's own
+# Kubernetes Lease and this cluster's own NATS — there is no cross-region coordination between
+# prod and prod-dr. This deployment runs its own independent active+standby pair against
+# DR-region NATS; promoting DR to be the system of record on a regional prod outage is an
+# operational/DNS-cutover decision outside this service, not something it negotiates itself.
+
+sequencer:
+  ingress:
+    nats:
+      url: nats://nats.prod-dr.md-platform.internal:4222
+  egress:
+    nats:
+      url: nats://nats.prod-dr.md-platform.internal:4222
+  leadership:
+    lease-namespace: md-sequencer-dr
+
+management:
+  metrics:
+    tags:
+      environment: prod-dr
+
+info:
+  environment: prod-dr

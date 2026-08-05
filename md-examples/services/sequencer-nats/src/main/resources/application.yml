@@ -1,0 +1,92 @@
+spring:
+  application:
+    name: md-sequencer
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,metrics,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  info:
+    env:
+      enabled: true
+  metrics:
+    tags:
+      # Overridden by each application-{env}.yml — lets one Prometheus/Grafana instance tell
+      # local/dev/uat/prod/prod-dr apart on every metric without separate scrape jobs.
+      environment: unknown
+
+# Surfaced at /actuator/info under "environment"; each application-{env}.yml overrides this.
+info:
+  environment: unknown
+
+sequencer:
+  stamping:
+    profile: v4                       # v4 | v3
+    sequence-id-offset: 8
+    sequence-timestamp-offset: 32
+    schema-id: 100
+    schema-id-offset: 4
+    template-id-offset: 2
+    validate-schema-id-per-message: false
+    event-enrichment:
+      enabled: true
+      event-id-offset: 40
+      boundary-template-id: 6
+      first-sequence-id-offset: 56
+      last-sequence-id-offset: 64
+      max-tracked-events: 65536
+    # v3 profile only:
+    timestamp-template-ids: [1, 9]
+  allocator:
+    block-size: 1000000
+    lease-ahead-fraction: 0.8
+    kv-bucket: sequencer-lease
+    kv-key: high-water
+  ingress:
+    nats:
+      # Generic in-cluster default; every application-{env}.yml overrides this with the real
+      # per-environment NATS endpoint (see md-sequencer/k8s/README.md).
+      url: nats://nats:4222
+      mode: jetstream                 # jetstream | core
+      stream: MD_RAW
+      subject: "tick.sbe.>"
+      consumer: sequencer             # named durable
+      batch-size: 1000
+  egress:
+    type: jetstream                   # core | jetstream
+    backpressure: block               # block | drop
+    max-stall-ms: 500
+    nats:
+      url: nats://nats:4222
+      stream: MD_SEQUENCED
+      subject: md.sequenced           # .batch appended automatically when batching on
+    jetstream:
+      max-in-flight: 8192
+    batching:
+      enabled: true                   # default true for jetstream, false for core
+      max-messages: 100
+      max-bytes: 65536
+      max-linger-micros: 1000
+      flush-on-event-boundary: true
+  heartbeat:
+    enabled: true
+    interval-ms: 100
+    source-id: SEQR
+  leadership:
+    lease-name: gcm-md-sequencer
+    # Generic fallback; every application-{env}.yml overrides this with the k8s namespace it's
+    # actually deployed into (see md-sequencer/k8s/README.md).
+    lease-namespace: default
+    lease-duration-seconds: 10
+    renew-deadline-seconds: 7

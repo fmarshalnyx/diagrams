@@ -1,0 +1,263 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus datasource scraping the gcm-md-sequencer-aeron chart's ServiceMonitors (cluster-node, nats-bridge, line-handler-template, mock-upstream-source).",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "id": null,
+  "uid": "gcm-md-sequencer-aeron",
+  "title": "GCM-MD Sequencer (Aeron, phase 2)",
+  "description": "Design doc §17 / implementation-steps.md Milestone 10. Covers the whole phase-2 pipeline: mock-upstream-source -> line-handler-template -> cluster-node (Aeron/Raft) -> nats-bridge -> md.sequenced -> mock-upstream-source's own verifier. Panel groupings: cluster leadership/health, end-to-end throughput, correctness invariants (should be permanently zero), backpressure/errors, replay/lag, snapshot/consensus internals.",
+  "tags": ["gcm-md", "sequencer", "aeron", "phase-2"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "label": "Datasource"
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(bridge_messages, environment)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" },
+        "hide": 0,
+        "label": "Environment"
+      }
+    ]
+  },
+  "panels": [
+    { "id": 1, "type": "row", "title": "Cluster leadership & health", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false, "panels": [] },
+    {
+      "id": 2, "type": "stat", "title": "Leader count (must be exactly 1)",
+      "description": "count of cluster-node pods currently reporting sequencer_cluster_role==2 (LEADER, Aeron's Role.LEADER.code()). 0 means no leader elected; >1 would mean split-brain and should never happen.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "count(sequencer_cluster_role{environment=~\"$environment\"} == 2)", "legendFormat": "leaders" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "red", "value": null }, { "color": "green", "value": 1 }, { "color": "red", "value": 2 }
+      ] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 3, "type": "state-timeline", "title": "Per-member role (0=FOLLOWER, 1=CANDIDATE, 2=LEADER)",
+      "description": "sequencer_cluster_role per cluster-node pod. Watch for flapping (frequent CANDIDATE excursions) - a sign of an unstable leader, e.g. the still-open cluster-node-restart investigation (implementation-steps.md).",
+      "gridPos": { "h": 5, "w": 10, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sequencer_cluster_role{environment=~\"$environment\"}", "legendFormat": "{{pod}}" }],
+      "fieldConfig": { "defaults": { "mappings": [
+        { "type": "value", "options": { "0": { "text": "FOLLOWER", "color": "blue" }, "1": { "text": "CANDIDATE", "color": "yellow" }, "2": { "text": "LEADER", "color": "green" } } }
+      ] }, "overrides": [] }
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Commit position",
+      "description": "sequencer_commit_position per member - should climb steadily and in lockstep across members in a healthy multi-member cluster.",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sequencer_commit_position{environment=~\"$environment\"}", "legendFormat": "{{pod}}" }]
+    },
+
+    { "id": 10, "type": "row", "title": "End-to-end throughput", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 }, "collapsed": false, "panels": [] },
+    {
+      "id": 11, "type": "timeseries", "title": "Pipeline throughput funnel (msg/s)",
+      "description": "The four stages of the phase-2 loop: mock-upstream-source publishes -> line-handler-template relays into the cluster -> nats-bridge republishes to md.sequenced -> mock-upstream-source's own consumer observes it. A sustained gap between adjacent stages points at exactly where the pipeline is bottlenecked or stalled.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(mock_upstream_published{environment=~\"$environment\"}[1m]))", "legendFormat": "1. mock-upstream-source published" },
+        { "expr": "sum(rate(line_handler_messages_relayed{environment=~\"$environment\"}[1m]))", "legendFormat": "2. line-handler-template relayed" },
+        { "expr": "sum(rate(bridge_messages{environment=~\"$environment\"}[1m]))", "legendFormat": "3. nats-bridge bridged" },
+        { "expr": "sum(rate(mock_upstream_observed{environment=~\"$environment\"}[1m]))", "legendFormat": "4. mock-upstream-source observed" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+
+    { "id": 20, "type": "row", "title": "Correctness invariants (should be permanently zero)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }, "collapsed": false, "panels": [] },
+    {
+      "id": 21, "type": "stat", "title": "bridge_gap",
+      "description": "Contiguity break in sequenceIds consumed off the Aeron egress stream, before NATS. Design §9: phase-2 egress is contiguous by construction - nonzero here is an egress bug, never routine noise.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(bridge_gap{environment=~\"$environment\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "background" }
+    },
+    {
+      "id": 22, "type": "stat", "title": "mock_upstream_gap",
+      "description": "Contiguity break on the final observed egress (post-NATS), as seen by mock-upstream-source's own JetStream-backed verifier. See implementation-steps.md for the incident history behind this metric (NATS storage exhaustion, since fixed; core-NATS-drop false positives, since fixed by switching EgressConsumer to JetStream).",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(mock_upstream_gap{environment=~\"$environment\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "background" }
+    },
+    {
+      "id": 23, "type": "stat", "title": "mock_upstream_duplicate",
+      "description": "Duplicate sequenceIds seen on the final observed egress. A small, slowly-growing nonzero rate is a known, tracked artifact of JetStream's at-least-once redelivery on the verifier's own subscription (see the Nats-Msg-Id dedup-header follow-up in implementation-steps.md) rather than proof of a system-level double-publish - but a sudden jump is still worth investigating.",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(mock_upstream_duplicate{environment=~\"$environment\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "background" }
+    },
+    {
+      "id": 24, "type": "stat", "title": "sequencer_schema_mismatch",
+      "description": "Ingress messages that failed the configured schemaId check at the leader (design §4's REJECTED_SCHEMA verdict). Nonzero means a line handler is sending the wrong schema, or offsets are misconfigured.",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(sequencer_schema_mismatch{environment=~\"$environment\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "background" }
+    },
+    {
+      "id": 25, "type": "stat", "title": "sequencer_egress_suppressed",
+      "description": "Messages the SuppressionGate blocked from a double-publish (design §6.4's own invariant: 'no sequenced message is ever published twice'). Expected to be nonzero occasionally around a leadership change (that's the gate doing its job); a high, steadily-climbing rate outside of failover windows would be suspicious.",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(sequencer_egress_suppressed{environment=~\"$environment\"})" }],
+      "options": { "graphMode": "none", "colorMode": "value" }
+    },
+    {
+      "id": 26, "type": "stat", "title": "sequencer_event_tracking_evicted",
+      "description": "Per-source dedup/gap-tracking state evicted before being observed (a bounded-memory tradeoff in the stamping engine). Nonzero suggests the per-source tracking window is too small for the actual traffic pattern.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(sequencer_event_tracking_evicted{environment=~\"$environment\"})" }],
+      "options": { "graphMode": "none", "colorMode": "value" }
+    },
+    {
+      "id": 28, "type": "stat", "title": "bridge_checkpoint_reset",
+      "description": "ContiguityTracker rebasing a stale NATS-KV checkpoint after a sustained run of below-checkpoint sequenceIds - distinct from bridge_gap: this is the bridge recovering from a non-monotonic sequenceId-space reset (e.g. a single-member cluster-node losing non-persisted Archive state), not an egress bug. Should be permanently zero against a genuinely production-safe multi-member cluster (design §9); nonzero in local/dev testing is expected whenever cluster-node loses state. See ContiguityTracker's class Javadoc for the heuristic and its false-positive risk (premature rebase -> duplicate publish) if checkpoint-reset-threshold-messages is set too low for the deployment's real replay-catchup backlog.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "sum(bridge_checkpoint_reset{environment=~\"$environment\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "background" }
+    },
+    {
+      "id": 27, "type": "timeseries", "title": "Per-source duplicate / gap rate",
+      "description": "sequencer_source_duplicate_total and sequencer_source_seq_gap_total, both tagged by source name (configured in clusterNode.sources). These are phase-1-and-phase-2-shared metric names (carried forward per design §17) - a migration-period dashboard naturally overlays both phases here.",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum by (source) (rate(sequencer_source_duplicate_total{environment=~\"$environment\"}[5m]))", "legendFormat": "duplicate: {{source}}" },
+        { "expr": "sum by (source) (rate(sequencer_source_seq_gap_total{environment=~\"$environment\"}[5m]))", "legendFormat": "gap: {{source}}" }
+      ]
+    },
+
+    { "id": 30, "type": "row", "title": "Backpressure & errors", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 }, "collapsed": false, "panels": [] },
+    {
+      "id": 31, "type": "timeseries", "title": "Publish failures / drops",
+      "description": "bridge_publish_failures (nats-bridge -> md.sequenced) and line_handler_publish_failures / line_handler_offer_retries (line-handler-template -> cluster). See implementation-steps.md's incident writeup for why these can spike together with NATS storage pressure.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(bridge_publish_failures{environment=~\"$environment\"}[1m]))", "legendFormat": "bridge_publish_failures" },
+        { "expr": "sum(rate(bridge_dropped{environment=~\"$environment\"}[1m]))", "legendFormat": "bridge_dropped" },
+        { "expr": "sum(rate(line_handler_publish_failures{environment=~\"$environment\"}[1m]))", "legendFormat": "line_handler_publish_failures" },
+        { "expr": "sum(rate(line_handler_offer_retries{environment=~\"$environment\"}[1m]))", "legendFormat": "line_handler_offer_retries" }
+      ]
+    },
+    {
+      "id": 32, "type": "timeseries", "title": "Silent-thread-death guards (should be permanently zero)",
+      "description": "bridge_loop_errors / line_handler_relay_loop_errors - count iterations where the bridge/relay poll loop caught and survived a transient exception instead of the daemon thread dying silently (a real incident this session: an uncaught NATS-storage-exhaustion exception used to kill nats-bridge's bridging thread permanently while the pod stayed Running/Ready). Nonzero means something transient is happening and being recovered from - worth alerting on even though it's not an outage by itself.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(bridge_loop_errors{environment=~\"$environment\"}[1m]))", "legendFormat": "bridge_loop_errors" },
+        { "expr": "sum(rate(line_handler_relay_loop_errors{environment=~\"$environment\"}[1m]))", "legendFormat": "line_handler_relay_loop_errors" }
+      ]
+    },
+    {
+      "id": 33, "type": "timeseries", "title": "Backpressure stall time",
+      "description": "*_backpressure_stall_seconds across the pipeline - time spent blocked waiting for room in a bounded publish window. Phase-1 sequencer_backpressure_stall_seconds is included for migration-period comparison.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 39 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(bridge_backpressure_stall_seconds{environment=~\"$environment\"}[1m]))", "legendFormat": "nats-bridge" },
+        { "expr": "sum(rate(line_handler_backpressure_stall_seconds{environment=~\"$environment\"}[1m]))", "legendFormat": "line-handler-template" },
+        { "expr": "sum(rate(sequencer_backpressure_stall_seconds{environment=~\"$environment\"}[1m]))", "legendFormat": "sequencer (phase-1 or cluster-node)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 34, "type": "timeseries", "title": "In-flight publish window",
+      "description": "*_inflight_window - current size of each bounded async-publish-ack window. Sustained pinning near its configured max (jetstream-max-in-flight) is a leading indicator of the stall/backpressure issues above.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 39 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "bridge_inflight_window{environment=~\"$environment\"}", "legendFormat": "nats-bridge {{pod}}" },
+        { "expr": "line_handler_inflight_window{environment=~\"$environment\"}", "legendFormat": "line-handler-template {{pod}}" },
+        { "expr": "sequencer_inflight_window{environment=~\"$environment\"}", "legendFormat": "sequencer {{pod}}" }
+      ]
+    },
+
+    { "id": 40, "type": "row", "title": "Replay & lag", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 }, "collapsed": false, "panels": [] },
+    {
+      "id": 41, "type": "stat", "title": "nats-bridge replay catch-up active",
+      "description": "bridge_lag_sequences: 1 while ReplayMerge is still catching up from the leader's Archive recording after downtime, 0 once merged/live. See BridgePipeline's Javadoc for why this is a coarse but real proxy, not a precise byte/sequence lag.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "max(bridge_lag_sequences{environment=~\"$environment\"})" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "LIVE", "color": "green" }, "1": { "text": "CATCHING UP", "color": "yellow" } } }] }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "background" }
+    },
+    {
+      "id": 42, "type": "timeseries", "title": "Last sequenceId observed, by stage",
+      "description": "bridge_last_sequence_id (nats-bridge's own tail) vs line_handler_last_source_seq_num (line-handler-template's upstream tail, a different numbering space - source stream sequence, not the cluster's assigned sequenceId, but useful as a relative lag proxy for whether either side has stalled).",
+      "gridPos": { "h": 5, "w": 18, "x": 6, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "bridge_last_sequence_id{environment=~\"$environment\"}", "legendFormat": "nats-bridge last sequenceId" },
+        { "expr": "line_handler_last_source_seq_num{environment=~\"$environment\"}", "legendFormat": "line-handler-template last sourceSeqNum" }
+      ]
+    },
+    {
+      "id": 43, "type": "stat", "title": "sequencer_dr_replication_lag_sequences",
+      "description": "Registered ahead of the prod-dr work landing (Milestone 12) - stays at 0 until a real DR Archive replicator calls ClusterMetrics.setDrReplicationLagSequences(). Present now so this dashboard doesn't need a panel added later just for this.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 52 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "max(sequencer_dr_replication_lag_sequences{environment=~\"$environment\"})" }],
+      "options": { "graphMode": "none", "colorMode": "value" }
+    },
+
+    { "id": 50, "type": "row", "title": "Snapshot & consensus internals", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 57 }, "collapsed": false, "panels": [] },
+    {
+      "id": 51, "type": "timeseries", "title": "Snapshot duration",
+      "description": "sequencer_snapshot_duration_seconds (p50/p99 from the summary's sum/count) - wall-clock duration of onTakeSnapshot. A trend upward over time as the sequencer's dedup/gap-tracking state grows is worth watching.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "rate(sequencer_snapshot_duration_seconds_sum{environment=~\"$environment\"}[10m]) / rate(sequencer_snapshot_duration_seconds_count{environment=~\"$environment\"}[10m])", "legendFormat": "mean" },
+        { "expr": "sequencer_snapshot_duration_seconds_max{environment=~\"$environment\"}", "legendFormat": "max" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 52, "type": "timeseries", "title": "Raw Aeron counters (errors / flow control / back-pressure)",
+      "description": "aeron_counter_value{id,label} - every counter the embedded media driver exposes (design §17), one gauge per counter id/label pair (AeronCountersExporter's own Javadoc explains the snapshot-at-construction caveat). Filtered here to labels containing 'error' or 'back' as a starting point; edit the regex to explore the full set via the label filter, since Aeron's counter catalog isn't centrally documented and varies by driver version.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "aeron_counter_value{environment=~\"$environment\", label=~\".*(?i)(error|back.?press).*\"}", "legendFormat": "{{label}}" }
+      ]
+    }
+  ]
+}

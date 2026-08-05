@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: mock-upstream-source
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,metrics,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    tags:
+      environment: unknown
+
+mock-upstream-source:
+  url: nats://localhost:4222
+  stream: MOCK_UPSTREAM
+  subject: upstream.mock.marketdata
+  egress-subject: md.sequenced
+  rate: 100000
+  pattern: steady
+  gap-probability: 0.0
+  duplicate-probability: 0.0
+  seed: 0
+  batched: false

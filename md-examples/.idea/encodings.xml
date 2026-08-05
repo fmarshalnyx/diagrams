@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Encoding">
+    <file url="file://$PROJECT_DIR$/build/gcm-md-parent/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/build/gcm-md-parent/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/architecture-tests/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/architecture-tests/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/cluster-client/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/cluster-client/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/ingress-transport/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/ingress-transport/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/md-models-sbe/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/md-models-sbe/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/nats-egress/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/nats-egress/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/sequencer-core/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/libs/sequencer-core/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/md-models-sbe/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/md-models-sbe/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/md-sequencer/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/md-sequencer/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/sequencer-bench/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/sequencer-bench/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/sequencer-loadgen/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/sequencer-loadgen/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/bench/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/bench/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/cluster-node/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/cluster-node/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/ingress-shim/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/ingress-shim/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/integration-tests/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/integration-tests/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/line-handler-template/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/line-handler-template/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/loadgen/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/loadgen/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/mock-upstream-source/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/mock-upstream-source/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/nats-bridge/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-aeron/nats-bridge/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-nats/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/services/sequencer-nats/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />
+  </component>
+</project>

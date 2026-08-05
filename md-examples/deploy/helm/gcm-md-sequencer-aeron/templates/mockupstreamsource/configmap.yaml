@@ -1,0 +1,12 @@
+{{- if .Values.mockUpstreamSource.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gcm-md.mockUpstreamSource.name" . }}-config
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mock-upstream-source
+data:
+  application.yml: |
+{{ .Values.mockUpstreamSource.configYaml | indent 4 }}
+{{- end }}

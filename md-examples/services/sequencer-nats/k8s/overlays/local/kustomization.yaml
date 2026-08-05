@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: md-sequencer-local
+
+resources:
+  - ../../base/core
+  - nats.yaml # no shared NATS infra on a laptop — run a single-node instance alongside it
+
+images:
+  - name: gcm-md-sequencer
+    newTag: local # built locally with `docker build -t gcm-md-sequencer:local`
+
+configMapGenerator:
+  - name: gcm-md-sequencer-config
+    literals:
+      - SPRING_PROFILES_ACTIVE=local
+
+patches:
+  - path: patch-deployment.yaml
+    target:
+      kind: Deployment
+      name: gcm-md-sequencer

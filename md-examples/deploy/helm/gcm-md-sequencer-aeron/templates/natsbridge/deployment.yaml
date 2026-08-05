@@ -1,0 +1,101 @@
+{{- if .Values.natsBridge.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gcm-md.natsBridge.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats-bridge
+spec:
+  replicas: {{ .Values.natsBridge.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: nats-bridge
+  template:
+    metadata:
+      labels:
+        {{- include "gcm-md.labels" . | nindent 8 }}
+        app.kubernetes.io/component: nats-bridge
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.natsBridge.serverPort }}"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      serviceAccountName: {{ include "gcm-md.natsBridge.name" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nats-bridge
+          image: "{{ .Values.natsBridge.image.repository }}:{{ .Values.natsBridge.image.tag }}"
+          imagePullPolicy: {{ .Values.natsBridge.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "file:/workspace/config/"
+            - name: NATS_BRIDGE_NATS_URL
+              value: {{ .Values.nats.url | quote }}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # One channel per cluster member (LeaderArchiveConnector tries each in turn and keeps
+            # whichever one actually has the egress recording) — a single bare headless-Service
+            # DNS name round-robins across every member's IP with no leader-following, and can
+            # silently land on a follower's empty archive. See _helpers.tpl's comment on this
+            # helper and NatsBridgeProperties.Cluster's own Javadoc-equivalent comment.
+            - name: NATS_BRIDGE_CLUSTER_ARCHIVE_CONTROL_CHANNELS
+              value: {{ include "gcm-md.clusterNode.archiveControlChannels" . | quote }}
+            # This bridge's own listen address for archive control responses / replayed data —
+            # must be reachable from cluster-node's pod, so the pod's own IP, not localhost.
+            - name: NATS_BRIDGE_CLUSTER_ARCHIVE_CONTROL_RESPONSE_CHANNEL
+              value: "aeron:udp?endpoint=$(POD_IP):0"
+            # Must match cluster-node's AeronEgressConfig control channel format exactly
+            # (control=, not endpoint=) — it's a dynamic-MDC publisher.
+            - name: NATS_BRIDGE_CLUSTER_LIVE_DESTINATION
+              value: "aeron:udp?control={{ include "gcm-md.clusterNode.name" . }}.{{ .Release.Namespace }}.svc.cluster.local:9070|control-mode=dynamic"
+            - name: NATS_BRIDGE_CLUSTER_REPLAY_DESTINATION
+              value: "aeron:udp?endpoint=$(POD_IP):0"
+            - name: NATS_BRIDGE_CLUSTER_REPLAY_CHANNEL
+              value: "aeron:udp?endpoint=$(POD_IP):0"
+          ports:
+            - name: http
+              containerPort: {{ .Values.natsBridge.serverPort }}
+          resources:
+            {{- toYaml .Values.natsBridge.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            # Spring + Aeron client init takes ~45s locally; without this delay the liveness
+            # probe kills the container mid-startup.
+            initialDelaySeconds: 60
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /workspace/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gcm-md.natsBridge.name" . }}-config
+        - name: tmp
+          emptyDir: {}
+{{- end }}

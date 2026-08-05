@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: line-handler-template
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,metrics,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    tags:
+      environment: unknown
+
+line-handler:
+  ingress-transport: aeron # aeron | nats
+  upstream:
+    url: nats://localhost:4222
+    stream: MOCK_UPSTREAM
+    subject: upstream.mock.marketdata
+    durable-consumer-name: line-handler-template
+    max-fetch-batch: 100
+    fetch-wait-millis: 200
+  aeron:
+    ingress-channel: "aeron:udp?term-length=64k"
+    ingress-endpoints: "0=localhost:9010"
+    egress-channel: "aeron:udp?endpoint=localhost:0|term-length=64k"
+    credential: line-handler-template
+  nats-ingress:
+    url: nats://localhost:4222
+    subject: MD_RAW
+    max-in-flight: 10000
+  stamping:
+    source-seq-num-offset: 64
+  offer:
+    retry-park-nanos: 1000000
+    warn-every-n-attempts: 100

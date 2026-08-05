@@ -1,0 +1,25 @@
+# AWS production environment profile (primary/active region). Activate with
+# SPRING_PROFILES_ACTIVE=prod (set by k8s/overlays/prod). Replace the NATS URL below with the
+# real endpoint for the production NATS cluster — see md-sequencer/k8s/README.md for the full
+# list of environment-specific values to fill in.
+#
+# prod-dr (see application-prod-dr.yml) MUST point at an independent NATS cluster in the DR
+# region — never the same one as this file, or failover has nothing to fail over to.
+
+sequencer:
+  ingress:
+    nats:
+      url: nats://nats.prod.md-platform.internal:4222
+  egress:
+    nats:
+      url: nats://nats.prod.md-platform.internal:4222
+  leadership:
+    lease-namespace: md-sequencer
+
+management:
+  metrics:
+    tags:
+      environment: prod
+
+info:
+  environment: prod

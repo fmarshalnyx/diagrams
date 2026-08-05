@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>ingress-transport</artifactId>
+    <packaging>jar</packaging>
+
+    <!-- libs/ingress-transport: the IngressTransport interface line handlers code against,
+         independent of which concrete transport (Aeron cluster, NATS) is selected at runtime by
+         config. Deliberately tiny and dependency-free beyond Agrona (DirectBuffer) so that
+         libs/cluster-client and libs/nats-egress can each depend on it without depending on each
+         other or pulling in Aeron/jnats respectively. See package-info.java for the full
+         rationale (this replaces the earlier ingress-shim strangler-service design). -->
+
+    <dependencies>
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- §3.3: rules (no services/* dependency, no Spring dependency) are managed
+                 centrally in build/gcm-md-parent's pluginManagement; this bare declaration
+                 activates them for this module. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

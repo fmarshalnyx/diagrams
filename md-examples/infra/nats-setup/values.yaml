@@ -1,0 +1,23 @@
+# infra/nats-setup (design §10, §11): official NATS chart values + our own idempotent
+# stream/KV setup Job. Local-sized defaults; environments/<env> overlays raise these.
+
+nats:
+  fullnameOverride: nats # so the Service is reachable at nats.<namespace>.svc.cluster.local
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        pvc:
+          size: 1Gi
+          storageClassName: hostpath
+
+setupJob:
+  image: natsio/nats-box:0.14.5
+  streams:
+    - name: MD_RAW
+      subjects: "tick.sbe.>"
+    - name: MD_SEQUENCED
+      subjects: "md.sequenced,md.sequenced.batch"
+  kvBuckets:
+    - sequencer-lease
+    - bridge-checkpoint

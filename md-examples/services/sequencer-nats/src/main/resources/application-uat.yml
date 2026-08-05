@@ -1,0 +1,21 @@
+# AWS UAT environment profile. Activate with SPRING_PROFILES_ACTIVE=uat (set by
+# k8s/overlays/uat). Replace the NATS URL below with the real endpoint for the UAT NATS cluster —
+# see md-sequencer/k8s/README.md for the full list of environment-specific values to fill in.
+
+sequencer:
+  ingress:
+    nats:
+      url: nats://nats.uat.md-platform.internal:4222
+  egress:
+    nats:
+      url: nats://nats.uat.md-platform.internal:4222
+  leadership:
+    lease-namespace: md-sequencer-uat
+
+management:
+  metrics:
+    tags:
+      environment: uat
+
+info:
+  environment: uat

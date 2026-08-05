@@ -1,0 +1,16 @@
+{{- if .Values.lineHandlerTemplate.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gcm-md.lineHandlerTemplate.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: line-handler-template
+spec:
+  selector:
+    app.kubernetes.io/component: line-handler-template
+  ports:
+    - name: http
+      port: {{ .Values.lineHandlerTemplate.serverPort }}
+      targetPort: http
+{{- end }}

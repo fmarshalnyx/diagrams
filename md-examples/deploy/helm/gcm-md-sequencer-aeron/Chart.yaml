@@ -1,0 +1,15 @@
+apiVersion: v2
+name: gcm-md-sequencer-aeron
+description: >-
+  GCM-MD phase-2 Aeron Cluster sequencer (design docs/AERON-SEQUENCER-DESIGN.md §10):
+  clusterNode (StatefulSet), natsBridge (Deployment), lineHandlerTemplate (Deployment),
+  mockUpstreamSource (Deployment), each independently toggleable via values.
+  lineHandlerTemplate/mockUpstreamSource are Milestone 5B's reference line handler and
+  persistent mock upstream traffic generator/verifier — separately deployable services,
+  not bundled together. Real (non-template) line handlers select their ingress transport
+  (Aeron cluster vs NATS) by their own config and deploy independently of this chart
+  (implementation-steps.md Milestone 5, revised — no ingress-shim). NATS itself is
+  deployed separately from infra/nats-setup.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

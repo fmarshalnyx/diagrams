@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>gcm.md</groupId>
+    <artifactId>gcm-md-parent</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <spring-boot.version>4.0.0</spring-boot.version>
+        <agrona.version>1.23.1</agrona.version>
+        <aeron.version>1.46.5</aeron.version>
+        <jnats.version>2.20.4</jnats.version>
+        <fabric8.version>6.13.4</fabric8.version>
+        <hdrhistogram.version>2.2.2</hdrhistogram.version>
+        <sbe-tool.version>1.33.1</sbe-tool.version>
+        <jmh.version>1.37</jmh.version>
+        <testcontainers.version>1.20.4</testcontainers.version>
+        <archunit.version>1.4.2</archunit.version>
+
+        <exec-maven-plugin.version>3.2.0</exec-maven-plugin.version>
+        <build-helper-maven-plugin.version>3.6.0</build-helper-maven-plugin.version>
+        <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
+        <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
+        <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
+        <jib-maven-plugin.version>3.4.4</jib-maven-plugin.version>
+        <!-- Default for modules with no jib config at all (skip). The 4 image-producing modules
+             override this property to false in their own <properties> - a property reference
+             here, not a literal, specifically so a global `-Djib.skip=true` (the build/integration
+             CI jobs use this - see their own comments) can still force skip=true everywhere,
+             including those 4 modules: a literal <skip>false</skip> in a module's own
+             <configuration> cannot be overridden by a command-line -D flag, which is exactly the
+             bug this property-based approach replaced - found by re-running the integration job
+             locally (gitlab-ci-local) after adding the per-module overrides and seeing
+             jib:dockerBuild fire again despite -Djib.skip=true being present on the command line. -->
+        <jib.skip>true</jib.skip>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>org.agrona</groupId>
+                <artifactId>agrona</artifactId>
+                <version>${agrona.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.aeron</groupId>
+                <artifactId>aeron-all</artifactId>
+                <version>${aeron.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.nats</groupId>
+                <artifactId>jnats</artifactId>
+                <version>${jnats.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-client</artifactId>
+                <version>${fabric8.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-httpclient-jdk</artifactId>
+                <version>${fabric8.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.hdrhistogram</groupId>
+                <artifactId>HdrHistogram</artifactId>
+                <version>${hdrhistogram.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>uk.co.real-logic</groupId>
+                <artifactId>sbe-tool</artifactId>
+                <version>${sbe-tool.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjdk.jmh</groupId>
+                <artifactId>jmh-core</artifactId>
+                <version>${jmh.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjdk.jmh</groupId>
+                <artifactId>jmh-generator-annprocess</artifactId>
+                <version>${jmh.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${testcontainers.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
+            </dependency>
+
+            <!-- Intra-repo modules: single ${project.version} across the whole reactor -->
+            <dependency>
+                <groupId>gcm.md</groupId>
+                <artifactId>md-models-sbe</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>gcm.md</groupId>
+                <artifactId>nats-egress</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>gcm.md</groupId>
+                <artifactId>sequencer-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>gcm.md</groupId>
+                <artifactId>ingress-transport</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>gcm.md</groupId>
+                <artifactId>cluster-client</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>gcm.md</groupId>
+                <artifactId>cluster-node</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>gcm.md</groupId>
+                <artifactId>md-sequencer</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <configuration>
+                        <!-- Integration suites (*IT) run under failsafe only (§12.2) -->
+                        <excludes>
+                            <exclude>**/*IT.java</exclude>
+                        </excludes>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>${maven-failsafe-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>integration-test</goal>
+                                <goal>verify</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring-boot.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>${maven-shade-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>exec-maven-plugin</artifactId>
+                    <version>${exec-maven-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>build-helper-maven-plugin</artifactId>
+                    <version>${build-helper-maven-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <!-- daemonless in CI (jib:build), local Docker Desktop via jib:dockerBuild (§11).
+                         skip=true by default here (pluginManagement) is not optional: both
+                         jib:dockerBuild and jib:build, invoked as bare CLI goals (the CI package:*
+                         jobs' `-am compile jib:build`, or a stray local `mvn jib:dockerBuild`),
+                         apply to *every* module in the reactor session's scope - including ones
+                         with no jib <configuration> at all, like `-am`-pulled dependency modules
+                         (md-models-sbe, sequencer-core, etc.) - which then fall back to jib's
+                         default base image guess (Java 21) and fail outright against this
+                         reactor's Java 25 target. Confirmed live running .gitlab-ci.yml locally
+                         (gitlab-ci-local): package:cluster-node failed on md-models-sbe this way.
+                         Only the 4 image-producing modules override this back to false. -->
+                    <groupId>com.google.cloud.tools</groupId>
+                    <artifactId>jib-maven-plugin</artifactId>
+                    <version>${jib-maven-plugin.version}</version>
+                    <configuration>
+                        <skip>${jib.skip}</skip>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>${maven-enforcer-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <id>enforce-reactor-rules</id>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                            <configuration>
+                                <rules>
+                                    <dependencyConvergence/>
+                                </rules>
+                            </configuration>
+                        </execution>
+                        <!-- Design §3.3: libs/* MUST NOT depend on services/*. Managed here so
+                             every libs/* module activates it with a bare <plugin> declaration
+                             instead of repeating the rule (design §3.2 called out this
+                             duplication as temporary until promoted to a shared rule set). -->
+                        <execution>
+                            <id>enforce-libs-no-services-dependency</id>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                            <configuration>
+                                <rules>
+                                    <bannedDependencies>
+                                        <excludes>
+                                            <exclude>gcm.md:md-sequencer</exclude>
+                                            <exclude>gcm.md:sequencer-loadgen</exclude>
+                                            <exclude>gcm.md:sequencer-bench</exclude>
+                                            <exclude>gcm.md:cluster-node</exclude>
+                                            <exclude>gcm.md:ingress-shim</exclude>
+                                            <exclude>gcm.md:nats-bridge</exclude>
+                                        </excludes>
+                                        <message>libs/* must not depend on services/* (design §3.3).</message>
+                                    </bannedDependencies>
+                                </rules>
+                            </configuration>
+                        </execution>
+                        <!-- Design §3.3: libs/* MUST NOT depend on Spring. -->
+                        <execution>
+                            <id>enforce-libs-no-spring-dependency</id>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                            <configuration>
+                                <rules>
+                                    <bannedDependencies>
+                                        <excludes>
+                                            <exclude>org.springframework:*</exclude>
+                                            <exclude>org.springframework.boot:*</exclude>
+                                        </excludes>
+                                        <message>libs/* (and cluster-node) must not depend on Spring (design §3.3).</message>
+                                    </bannedDependencies>
+                                </rules>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>

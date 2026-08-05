@@ -1,0 +1,126 @@
+# Local (Docker Desktop Kubernetes) overlay for deploy/helm/gcm-md-sequencer-aeron (design
+# §11). The chart's own values.yaml defaults are already local-shaped (replicas: 1) — this file
+# exists so "which values apply to local" is explicit and so a 3-member failover-drill profile
+# can be selected without touching the chart defaults.
+#
+# 3-member mode (design §11, 50-failover-drill.sh): `LOCAL_MEMBERS=3 deploy/local/30-deploy.sh`
+# (wired into the script itself — also flips clusterNode.persistence.enabled on, see the
+# script's own comment).
+
+clusterNode:
+  replicas: 1
+  image:
+    tag: local
+    # Always, not IfNotPresent: Docker Desktop's Kubernetes node caches the local tag's
+    # digest mapping and IfNotPresent skips re-resolving it, so a rebuild under the same tag
+    # is silently ignored on redeploy. Always still resolves against the local daemon (no
+    # registry needed) but forces the fresh mapping to be picked up.
+    pullPolicy: Always
+  # NOTE: this is a scalar override, not a merge — it replaces the chart default's sources
+  # value entirely, so line-handler-template's own credential entry must be repeated here too
+  # or cluster-node will reject its Aeron sessions with an unrecognized-principal error.
+  sources: "line-handler:2:line-handler-token"
+  # design §5.2: set explicitly here (even though it matches the chart default) so local's MTU
+  # is self-documenting and independent of any future chart-default change for AWS's 8k jumbo
+  # frames.
+  aeron:
+    mtuLength: 1408
+    # Raised well above the chart default (10000, Aeron's own out-of-the-box value): this shared
+    # Docker Desktop host is exactly where the 97-restarts/25h clean-shutdown incident happened
+    # (see ClusterNodeLauncher's Javadoc and the chart default's own comment) - a GC pause or CPU
+    # scheduling delay past the default window makes the consensus module's internal Aeron client
+    # conclude its co-located driver died, triggering a silent exit-0 self-restart. Raised only
+    # here, not in the chart default, so genuine-failure detection stays fast everywhere else
+    # (AWS envs are not resource-constrained the same way).
+    driverTimeoutMs: 30000
+  # Chart default (1 CPU / 2Gi) is prod-shaped and assumes a single member; 3 of those memory
+  # requests alone exceed Docker Desktop's typical 7Gi allocation (00-preflight.sh already warns
+  # this environment is under the design's recommended >= 12Gi) once line-handler-template/
+  # mock-upstream-source/nats-bridge/NATS are also scheduled. Memory is genuinely the scarce
+  # resource here, not CPU (Docker Desktop commonly has far more cores than memory available) -
+  # a tight CPU *limit* throttles the consensus module's Raft/session-connect handling badly
+  # enough to blow past AeronCluster's ~5s client connect timeout (confirmed via cgroup cpu.stat
+  # nr_throttled during this session), so only memory is constrained here; CPU limit is left
+  # generous.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+natsBridge:
+  enabled: true
+  image:
+    tag: local
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+lineHandlerTemplate:
+  enabled: true
+  image:
+    tag: local
+    pullPolicy: Always
+  # NOTE: scalar override of the chart default's configYaml, not a merge - must repeat
+  # upstream.stream/subject too. Raises aeron.driver-timeout-ms the same way and for the same
+  # reason clusterNode.aeron.driverTimeoutMs is raised above: this pod's own embedded Aeron
+  # client hit Aeron's 10s default and self-closed ("Aeron client is closed") after ~30h
+  # uninterrupted uptime on this shared Docker Desktop host - observed live in this session,
+  # root-caused as the same failure mode as cluster-node's restarts.
+  configYaml: |
+    line-handler:
+      upstream:
+        stream: MOCK_UPSTREAM
+        subject: upstream.mock.marketdata
+      aeron:
+        driver-timeout-ms: 30000
+  # See clusterNode.resources' comment: a tight CPU limit throttles this pod's own embedded
+  # Aeron client badly enough to blow past AeronCluster's connect timeout — the exact bug
+  # ingress-shim hit before it was retired. Kept generous here for the same reason.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+mockUpstreamSource:
+  enabled: true
+  image:
+    tag: local
+    pullPolicy: Always
+  # NOTE: this is a scalar override of the chart default's configYaml, not a merge — must repeat
+  # stream/subject/egress-subject, not just add `rate`. The chart default's rate (code default:
+  # 100,000/sec) is a stress-test ceiling this local pipeline cannot actually sustain end-to-end
+  # (observed ceiling here: ~1,600-2,000/sec, likely Docker Desktop CPU/Aeron-per-offer overhead) —
+  # a real incident this session: at 100k/sec, MOCK_UPSTREAM's WorkQueue-retention backlog grew to
+  # 5.6M unacked messages and exhausted the NATS server's whole JetStream storage quota, which
+  # broke nats-bridge's unrelated publishes too. 1000/sec leaves comfortable headroom under the
+  # observed ceiling for ordinary local dev/smoke-test use.
+  configYaml: |
+    mock-upstream-source:
+      stream: MOCK_UPSTREAM
+      subject: upstream.mock.marketdata
+      egress-subject: md.sequenced
+      rate: 1000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+serviceMonitor:
+  enabled: false # Docker Desktop has no Prometheus Operator CRD by default
+
+nats:
+  url: nats://nats.gcm-md-local.svc.cluster.local:4222

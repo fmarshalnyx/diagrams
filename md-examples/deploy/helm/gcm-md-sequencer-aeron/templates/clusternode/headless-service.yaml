@@ -1,0 +1,39 @@
+{{- if .Values.clusterNode.enabled }}
+# Headless Service (design §10): clusterIP: None, so each pod gets a stable per-pod DNS name
+# (<statefulset>-<ordinal>.<this-service>.<namespace>.svc.cluster.local) used to template the
+# Aeron cluster member list. No ClusterIP Service may ever front Aeron traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gcm-md.clusterNode.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-node
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/component: cluster-node
+  ports:
+    - name: client
+      port: {{ .Values.clusterNode.ports.client }}
+      protocol: UDP
+    - name: member
+      port: {{ .Values.clusterNode.ports.member }}
+      protocol: UDP
+    - name: log
+      port: {{ .Values.clusterNode.ports.log }}
+      protocol: UDP
+    - name: transfer
+      port: {{ .Values.clusterNode.ports.transfer }}
+      protocol: UDP
+    - name: archive
+      port: {{ .Values.clusterNode.ports.archive }}
+      protocol: UDP
+    - name: egress
+      port: 9070
+      protocol: UDP
+    - name: metrics
+      port: {{ .Values.clusterNode.ports.metrics }}
+      protocol: TCP
+{{- end }}

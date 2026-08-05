@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcm-md-sequencer
+spec:
+  replicas: 2 # keep testing the active/standby failover path even in dev
+  template:
+    spec:
+      containers:
+        - name: sequencer
+          env:
+            - name: JDK_JAVA_OPTIONS
+              value: >-
+                -XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch
+                -Xms1g -Xmx2g
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi

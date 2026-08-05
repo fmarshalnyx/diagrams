@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gcm-md-sequencer
+  labels:
+    app: gcm-md-sequencer
+spec:
+  selector:
+    app: gcm-md-sequencer
+  ports:
+    - name: management
+      port: 8081
+      targetPort: management

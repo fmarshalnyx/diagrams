@@ -1,0 +1,12 @@
+# Only meaningful with 2+ replicas — not included in the local overlay (single replica).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gcm-md-sequencer
+spec:
+  # With 2 replicas (1 active + 1 warm standby), never let voluntary disruption take both at
+  # once — that would mean no candidate available to acquire the lease (spec §10, §14).
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: gcm-md-sequencer

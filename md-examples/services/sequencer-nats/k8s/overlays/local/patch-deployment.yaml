@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcm-md-sequencer
+spec:
+  replicas: 1 # no HA/failover story worth testing on a laptop
+  template:
+    spec:
+      containers:
+        - name: sequencer
+          imagePullPolicy: Never # image is docker-built straight into Docker Desktop's runtime
+          env:
+            - name: JDK_JAVA_OPTIONS
+              value: >-
+                -XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch
+                -Xms256m -Xmx512m
+          resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
+            limits:
+              cpu: "250m"
+              memory: 512Mi

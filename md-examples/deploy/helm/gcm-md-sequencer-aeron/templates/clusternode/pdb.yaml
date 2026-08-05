@@ -1,0 +1,14 @@
+{{- if and .Values.clusterNode.enabled .Values.clusterNode.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gcm-md.clusterNode.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster-node
+spec:
+  maxUnavailable: {{ .Values.clusterNode.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: cluster-node
+{{- end }}

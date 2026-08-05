@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>integration-tests</artifactId>
+    <packaging>jar</packaging>
+
+    <!-- services/sequencer-aeron/integration-tests (design §12.2): failsafe *IT suite —
+         in-process multi-member Aeron cluster harness for the heavier failover/determinism
+         scenarios phase-1's own tests never had to cover (Raft has no equivalent). Also hosts
+         the §12.4 parallel-run diff tool.
+
+         STATUS (see docs/AERON-SEQUENCER-3-MEMBER-CLUSTER-STATUS.md for the full account): all
+         5 *IT classes are un-@Disabled and have run against the real in-process 3-member Raft
+         path at least once each. IngressIdempotencyIT is the furthest along: caught two real
+         bugs (an undersized test-message buffer; heartbeat messages sharing the global
+         sequenceId counter with ingress messages, which a fixed-count assertion didn't account
+         for) and one real perf bug in the test harness itself (RecordingEgressPublisher's use of
+         CopyOnWriteArrayList on the cluster's hot message-processing path). Getting a fully
+         clean, repeatable run has been blocked by this session's own severe memory pressure
+         (many hours of heavy JVM/container churn) rather than a further code defect — resume by
+         running in a fresh session/environment and iterating on any real failures that remain,
+         not by assuming everything here already passes cleanly. -->
+
+    <!-- Main sources here are just the §12.4 diff-harness CLI (gcm.md.sequencer.integration.tools)
+         — everything else is test-only, matching libs/architecture-tests' convention. sequencer-core
+         and jnats are compile-scope because the CLI needs them directly; cluster-node/cluster-client/
+         aeron-all stay test-scope since only the *IT classes touch the Aeron cluster. -->
+    <dependencies>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>sequencer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>cluster-node</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>cluster-client</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-all</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

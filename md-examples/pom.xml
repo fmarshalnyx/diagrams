@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>build/gcm-md-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>md-examples-parent</artifactId>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>build/gcm-md-parent</module>
+        <module>libs/md-models-sbe</module>
+        <module>libs/nats-egress</module>
+        <module>libs/architecture-tests</module>
+        <module>libs/sequencer-core</module>
+        <module>libs/ingress-transport</module>
+        <module>libs/cluster-client</module>
+        <module>services/sequencer-nats</module>
+        <module>services/sequencer-aeron/mock-upstream-source</module>
+        <module>services/sequencer-aeron/bench</module>
+        <module>services/sequencer-aeron/cluster-node</module>
+        <module>services/sequencer-aeron/nats-bridge</module>
+        <module>services/sequencer-aeron/line-handler-template</module>
+        <module>services/sequencer-aeron/integration-tests</module>
+    </modules>
+
+</project>

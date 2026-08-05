@@ -1,0 +1,914 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  ============================================================================
+  GCM Market Data — Normalized Internal Message Schema (SBE)
+
+  Package:     com.usb.gcm.md.sbe
+  Schema ID:   100
+  Version:     4
+  Byte Order:  Little Endian
+
+  This is the GCM-MD canonical wire format for all internal market data
+  distribution.  All line handlers (CME Smart Stream, CME MDP 3.0 UDP,
+  future sources) normalize their source-specific formats into these
+  messages before publishing to the sequencer → NATS/Aeron pipeline.
+
+  ============================================================================
+  v4 BREAKING CHANGES (from v3)
+  ============================================================================
+
+  v4 is a BREAKING layout change.  It must be rolled out to all producers
+  and consumers in a coordinated release.  Do this before consumers
+  proliferate — the payoff is a structurally enforced sequencer contract.
+
+  1. COMMON HEADER COMPOSITE (gcmHeader) — every message now begins with
+     the same 48-byte composite.  Consequences:
+       * sequenceId        at ABSOLUTE byte offset  8 in EVERY message
+       * sequenceTimestamp at ABSOLUTE byte offset 32 in EVERY message
+       * eventId           at ABSOLUTE byte offset 40 in EVERY message
+     The sequencer stamps offsets 8 and 32 UNCONDITIONALLY — zero
+     branching, no per-template rules, and a new template can never
+     accidentally break the convention (v3 relied on comments saying
+     "MUST remain in same order"; v4 makes it structural).
+
+  2. NUMERIC INSTRUMENT KEY (instrumentId, uint32) — high-rate messages
+     (MarketDataDelta, BookUpdate, OrderUpdate, TradeSummary, TradeFill)
+     no longer carry symbol/source/exchange/currency/maturity strings.
+     They carry only instrumentId.  Consumers resolve identity via
+     InstrumentDefinition (published on connect, on change, and
+     periodically).  MarketDataTick (the SNAPSHOT/recovery message)
+     remains fully self-describing.  Steady-state delta shrinks from
+     ~150 bytes to ~100 bytes; at 1M msgs/sec this saves ~50 MB/s of
+     wire and proportional decode work in every consumer.
+
+  3. MATCH EVENT SEMANTICS FIXED — the line handler cannot know global
+     sequenceIds before sequencing, so v3's MatchEventBoundary
+     firstSequenceId was unpopulatable at source.  v4:
+       * line handler stamps a source-scoped eventId (uint64, in
+         gcmHeader) into every message belonging to a matching-engine
+         event, including the boundary; eventId=0 means "not part of a
+         tracked event".
+       * MatchEventBoundary carries messageCount for integrity checking.
+       * The SEQUENCER (optionally, config-enabled) stamps
+         firstSequenceId / lastSequenceId into the boundary at fixed
+         absolute offsets 56 / 64, tracked per eventId.  Consumers get
+         atomic-event replay by global sequence range AND torn-event
+         detection by count.
+
+  4. MessageBatch (id=10) — transport envelope for sequencer egress
+     batching.  Packs N stamped messages into one NATS publish.  This is
+     what lets JetStream reach 1M logical msgs/sec (JetStream cost is
+     per-publish, not per-byte).  Carries firstSequenceId /
+     lastSequenceId so consumers detect gaps without unpacking.
+
+  5. HEARTBEAT UPGRADED — now emitted by the sequencer as well as line
+     handlers (heartbeatType discriminates).  Sequencer heartbeats carry
+     highWaterSequenceId so consumers can detect gaps during quiet
+     markets ("no data" vs "missing data" is otherwise undecidable).
+
+  6. ALIGNMENT — within each message body, fields are ordered wide→narrow
+     (u64/double, then u32, u16, u8, then char arrays) so all 8-byte
+     fields sit on 8-byte boundaries.  gcmHeader is 48 bytes; body data
+     starts at absolute offset 56, which is 8-byte aligned.  x86 tolerates
+     misaligned loads; ARM (Graviton) is far less forgiving — free
+     insurance.
+
+  7. PROPER ENUMS — Side, BookAction, OrderAction, AggressorSide replace
+     commented uint8 fields.  Same wire size, generated-code type safety.
+
+  8. EVOLUTION RULES —
+       * gcmHeader is FROZEN.  It includes reserved1 (uint64) for future
+         sequencer-stamped metadata (e.g. partition/epoch id if
+         sequencers are ever sharded).  Zero-filled by producers,
+         ignored by consumers.
+       * New fields are ONLY ever appended to message bodies with
+         sinceVersion.  Never reorder, never insert.
+       * New templates MUST begin with gcmHeader.  A sequencer-side
+         schemaId check (offset 4 == 100) guards against foreign
+         streams.
+
+  ============================================================================
+  SEQUENCER STAMPING CONTRACT (normative)
+  ============================================================================
+
+    offset 0..7    SBE messageHeader (blockLength u16, templateId u16,
+                                      schemaId u16, version u16)
+    offset 8       gcmHeader.sequenceId        (u64 LE)  <- sequencer writes, ALWAYS
+    offset 16      gcmHeader.sourceTimestamp   (u64 LE)  line handler writes
+    offset 24      gcmHeader.ingestTimestamp   (u64 LE)  line handler writes
+    offset 32      gcmHeader.sequenceTimestamp (u64 LE)  <- sequencer writes, ALWAYS
+    offset 40      gcmHeader.eventId           (u64 LE)  line handler writes (0 = none)
+    offset 48      gcmHeader.reserved1         (u64 LE)  zero-filled
+    offset 56      first body field (8-byte aligned)
+
+    MatchEventBoundary (templateId=6) additionally:
+    offset 56      firstSequenceId (u64 LE)  <- sequencer writes (optional feature)
+    offset 64      lastSequenceId  (u64 LE)  <- sequencer writes (optional feature)
+
+    MessageBatch (templateId=10) is CREATED by the sequencer after
+    stamping; it is an egress transport envelope and is never itself
+    stamped.
+
+  Reference data source:  CME MDP 3.0 (CME-templates_v13.xml)
+  Reference instrument:   Henry Hub Natural Gas Futures (NYMEX, SecurityGroup=NG)
+
+  NATS subject conventions:
+    Line handler → sequencer (per-instrument granularity retained):
+      tick.sbe.<source>.<assetClass>.<symbol>.<msgType>
+      e.g. tick.sbe.CME.energy.NGQ2026.delta
+    Sequencer → consumers (single totally-ordered firehose):
+      md.sequenced            (individual messages, batching disabled)
+      md.sequenced.batch      (MessageBatch envelopes, batching enabled)
+    Per-symbol filtered distribution is a downstream fan-out tier's job,
+    not the sequencer's — total order is meaningless if consumers
+    cherry-pick subjects with independent delivery.
+
+  CME MDP 3.0 field mapping is unchanged from v3 (see per-field
+  descriptions).  The v3 coverage analysis remains valid: all CME data
+  relevant to energy futures is fully carried; options/FI/FX/repo
+  templates remain out of Phase 1 scope.
+  ============================================================================
+-->
+
+<sbe:messageSchema
+    xmlns:sbe="http://fixprotocol.io/2016/sbe"
+    package="com.usb.gcm.md.sbe"
+    id="100"
+    version="4"
+    semanticVersion="2.0.0"
+    description="GCM-MD normalized internal market data messages (v4: common header, numeric instrument key, batch envelope)"
+    byteOrder="littleEndian">
+
+    <!-- ================================================================== -->
+    <!--  PRIMITIVE TYPES                                                    -->
+    <!-- ================================================================== -->
+
+    <types>
+        <!-- SBE message header (standard) -->
+        <composite name="messageHeader" description="SBE message header">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId"  primitiveType="uint16"/>
+            <type name="schemaId"    primitiveType="uint16"/>
+            <type name="version"     primitiveType="uint16"/>
+        </composite>
+
+        <!-- ============================================================== -->
+        <!--  GCM COMMON MESSAGE HEADER — v4                                 -->
+        <!--                                                                -->
+        <!--  FROZEN.  Every message begins with this composite.  It is     -->
+        <!--  the sequencer's entire contract with the schema:              -->
+        <!--    sequenceId        -> absolute offset  8  (sequencer writes) -->
+        <!--    sequenceTimestamp -> absolute offset 32  (sequencer writes) -->
+        <!--    eventId           -> absolute offset 40  (line handler)     -->
+        <!--  Do not add, remove, or reorder members.  reserved1 exists     -->
+        <!--  precisely so this never has to change.                        -->
+        <!-- ============================================================== -->
+        <composite name="gcmHeader" description="GCM common message header — 48 bytes, frozen layout. sequenceId abs offset 8, sequenceTimestamp abs offset 32, eventId abs offset 40.">
+            <type name="sequenceId"        primitiveType="uint64"
+                  description="Globally monotonic sequence ID assigned by the GCM-MD sequencer. Monotonic and sequential across ALL instruments and sources; gaps permitted (block-lease recovery, failover). Written by sequencer at absolute offset 8. Line handlers write 0."/>
+            <type name="sourceTimestamp"   primitiveType="uint64"
+                  description="Source-originated timestamp, nanos since Unix epoch. CME: TransactTime. Written by line handler."/>
+            <type name="ingestTimestamp"   primitiveType="uint64"
+                  description="Line handler ingest timestamp, nanos since Unix epoch. Written by line handler."/>
+            <type name="sequenceTimestamp" primitiveType="uint64"
+                  description="Sequencer assignment timestamp, nanos since Unix epoch (Agrona OffsetEpochNanoClock). Written by sequencer at absolute offset 32. Line handlers write 0."/>
+            <type name="eventId"           primitiveType="uint64"
+                  description="Source-scoped matching-engine event ID assigned by the line handler; identical across all messages of one event including the MatchEventBoundary. 0 = not part of a tracked event. At absolute offset 40 so the sequencer can read it with one fixed-offset load."/>
+            <type name="reserved1"         primitiveType="uint64"
+                  description="Reserved for future sequencer-stamped metadata (e.g. partition/epoch id for sharded sequencers). Producers MUST zero-fill; consumers MUST ignore."/>
+        </composite>
+
+        <!-- Variable-length data encoding (for string fields) -->
+        <composite name="varStringEncoding" description="Variable-length UTF-8 string">
+            <type name="length"  primitiveType="uint16" maxValue="1024"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+
+        <!-- Variable-length binary blob — one packed SBE message inside a MessageBatch -->
+        <composite name="varBlobEncoding" description="Variable-length binary blob (one complete SBE message incl. its messageHeader)">
+            <type name="length"  primitiveType="uint16" maxValue="65534"/>
+            <type name="varData" primitiveType="uint8" length="0"/>
+        </composite>
+
+        <!-- Repeating group header -->
+        <composite name="groupSizeEncoding" description="Repeating group dimensions">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup"  primitiveType="uint16"/>
+        </composite>
+
+        <!-- ============================================================== -->
+        <!--  PRICE TYPES — IEEE 754 double precision                        -->
+        <!--  Native double values in natural units (e.g. 2.86 for $2.86)    -->
+        <!--  NaN sentinel = field not present (delta/optional).              -->
+        <!-- ============================================================== -->
+
+        <type name="PriceOptional" primitiveType="double" presence="optional"
+              nullValue="NaN"
+              description="Optional price as IEEE 754 double. NaN = field not present (delta)."/>
+
+        <type name="Price" primitiveType="double"
+              description="Required price as IEEE 754 double."/>
+
+        <type name="DecimalOptional" primitiveType="double" presence="optional"
+              nullValue="NaN"
+              description="Optional decimal as IEEE 754 double. NaN = not present."/>
+
+        <type name="Decimal" primitiveType="double"
+              description="Required decimal as IEEE 754 double."/>
+
+        <type name="QtyNULL" primitiveType="int64" presence="optional"
+              nullValue="9223372036854775807"
+              description="Optional quantity. Null = not present in delta."/>
+
+        <type name="Int32NULL" primitiveType="int32" presence="optional"
+              nullValue="2147483647"
+              description="Optional int32. Null = not present."/>
+
+        <type name="UInt8NULL" primitiveType="uint8" presence="optional"
+              nullValue="255"
+              description="Optional uint8. Null = not present."/>
+
+        <type name="UInt16NULL" primitiveType="uint16" presence="optional"
+              nullValue="65535"
+              description="Optional uint16. Null = not present."/>
+
+        <type name="UInt64NULL" primitiveType="uint64" presence="optional"
+              nullValue="18446744073709551615"
+              description="Optional uint64. Null = not present."/>
+
+        <!-- GCM-MD assigned compact instrument key.
+             Assigned by reference-data service / line handler at instrument
+             discovery; stable for the trading session; published in
+             InstrumentDefinition.  High-rate messages carry ONLY this. -->
+        <type name="InstrumentId" primitiveType="uint32"
+              description="GCM-MD compact numeric instrument key. Resolve via InstrumentDefinition."/>
+
+        <!-- Fixed-length string types for instrument identity -->
+        <type name="Symbol"       primitiveType="char" length="20" characterEncoding="ASCII" description="GCM-MD normalized symbol (e.g. NGQ2026). Year expanded to 4 digits."/>
+        <type name="SourceSymbol" primitiveType="char" length="20" characterEncoding="ASCII" description="Exact symbol as received from source (e.g. CME sends NGQ6). Verbatim, no transformation."/>
+        <type name="Source"   primitiveType="char" length="8" characterEncoding="ASCII"  description="Data source (e.g. CME, ICE, BBG) or internal component (SEQR)"/>
+        <type name="Exchange" primitiveType="char" length="4" characterEncoding="ASCII"  description="Exchange code (e.g. NYMX, XCME)"/>
+        <type name="Currency" primitiveType="char" length="3" characterEncoding="ASCII"  description="ISO 4217 currency code"/>
+        <type name="Asset"    primitiveType="char" length="6" characterEncoding="ASCII"  description="Asset/product code (e.g. NG)"/>
+        <type name="SecurityGroup" primitiveType="char" length="6" characterEncoding="ASCII" description="Security group (e.g. NG)"/>
+        <type name="UnitOfMeasure" primitiveType="char" length="30" characterEncoding="ASCII" description="Unit of measure (e.g. MMBtu)"/>
+
+        <!-- Maturity encoding — matches CME MaturityMonthYear -->
+        <composite name="MaturityMonthYear" description="Contract maturity: year, month, optional day/week">
+            <type name="year"  primitiveType="uint16" presence="optional" nullValue="65535"/>
+            <type name="month" primitiveType="uint8"  presence="optional" nullValue="255"/>
+            <type name="day"   primitiveType="uint8"  presence="optional" nullValue="255"/>
+            <type name="week"  primitiveType="uint8"  presence="optional" nullValue="255"/>
+        </composite>
+
+        <!-- ============================================================== -->
+        <!--  ENUMS                                                         -->
+        <!-- ============================================================== -->
+
+        <enum name="UpdateType" encodingType="uint8"
+              description="Identifies whether this message is a full snapshot or an incremental delta update">
+            <validValue name="SNAPSHOT"  description="Full instrument state — all fields populated">0</validValue>
+            <validValue name="DELTA"     description="Incremental update — only changed fields populated, others null">1</validValue>
+        </enum>
+
+        <enum name="AssetClass" encodingType="uint8"
+              description="Broad asset class for NATS subject routing">
+            <validValue name="ENERGY"      description="Energy commodities (NG, CL, etc.)">0</validValue>
+            <validValue name="AGRICULTURE" description="Agricultural commodities">1</validValue>
+            <validValue name="METALS"      description="Metals (gold, silver, copper)">2</validValue>
+            <validValue name="RATES"       description="Interest rates / fixed income">3</validValue>
+            <validValue name="FX"          description="Foreign exchange">4</validValue>
+            <validValue name="EQUITY"      description="Equity / equity index">5</validValue>
+        </enum>
+
+        <enum name="InstrumentType" encodingType="uint8"
+              description="Type of instrument">
+            <validValue name="FUTURE"  description="Futures contract">0</validValue>
+            <validValue name="OPTION"  description="Options contract">1</validValue>
+            <validValue name="SPREAD"  description="Spread / strategy">2</validValue>
+            <validValue name="SPOT"    description="Spot / cash">3</validValue>
+        </enum>
+
+        <enum name="TradingStatus" encodingType="uint8" presence="optional" nullValue="255"
+              description="Current trading state of the instrument">
+            <validValue name="PreOpen"              description="Pre-open / pre-market">0</validValue>
+            <validValue name="Open"                 description="Ready to trade / open">1</validValue>
+            <validValue name="Halt"                 description="Trading halted">2</validValue>
+            <validValue name="Close"                description="Market closed">3</validValue>
+            <validValue name="PreCross"             description="Pre-cross session">4</validValue>
+            <validValue name="Cross"                description="Crossing session">5</validValue>
+            <validValue name="PostClose"            description="Post-close session">6</validValue>
+            <validValue name="NotAvailable"         description="Not available for trading">7</validValue>
+            <validValue name="NewPriceIndication"   description="New price indication">8</validValue>
+            <validValue name="Unknown"              description="Unknown state">9</validValue>
+        </enum>
+
+        <enum name="SettlementType" encodingType="uint8" presence="optional" nullValue="255"
+              description="Characterizes the settlement price">
+            <validValue name="Preliminary" description="Preliminary daily settlement">0</validValue>
+            <validValue name="Final"       description="Final daily settlement">1</validValue>
+            <validValue name="Theoretical" description="Theoretically calculated">2</validValue>
+            <validValue name="Intraday"    description="Intraday settlement mark">3</validValue>
+        </enum>
+
+        <!-- v4: proper enums replacing commented uint8 fields (same wire size) -->
+
+        <enum name="Side" encodingType="uint8"
+              description="Book side. CME: MDEntryTypeBook.">
+            <validValue name="BID"          description="Bid">0</validValue>
+            <validValue name="ASK"          description="Ask / offer">1</validValue>
+            <validValue name="IMPLIED_BID"  description="Implied bid">2</validValue>
+            <validValue name="IMPLIED_ASK"  description="Implied ask">3</validValue>
+        </enum>
+
+        <enum name="BookAction" encodingType="uint8"
+              description="Price-level update action. CME: MDUpdateAction.">
+            <validValue name="NEW"         description="New level">0</validValue>
+            <validValue name="CHANGE"      description="Level changed">1</validValue>
+            <validValue name="DELETE"      description="Level deleted">2</validValue>
+            <validValue name="DELETE_THRU" description="Delete this level and all better">3</validValue>
+            <validValue name="DELETE_FROM" description="Delete this level and all worse">4</validValue>
+            <validValue name="OVERLAY"     description="Overlay / replace">5</validValue>
+        </enum>
+
+        <enum name="OrderAction" encodingType="uint8"
+              description="Individual order action. CME: OrderUpdateAction.">
+            <validValue name="NEW"    description="New order">0</validValue>
+            <validValue name="UPDATE" description="Order updated">1</validValue>
+            <validValue name="DELETE" description="Order deleted">2</validValue>
+        </enum>
+
+        <enum name="AggressorSide" encodingType="uint8"
+              description="Trade aggressor side. CME: AggressorSide.">
+            <validValue name="NO_AGGRESSOR" description="No aggressor (e.g. cross)">0</validValue>
+            <validValue name="BUY"          description="Buy aggressor">1</validValue>
+            <validValue name="SELL"         description="Sell aggressor">2</validValue>
+        </enum>
+
+        <enum name="HeartbeatType" encodingType="uint8"
+              description="Which component emitted this heartbeat">
+            <validValue name="LINE_HANDLER" description="Line handler feed liveness">0</validValue>
+            <validValue name="SEQUENCER"    description="Sequencer liveness + high-water mark for gap detection in quiet markets">1</validValue>
+        </enum>
+
+        <!-- ============================================================== -->
+        <!--  FIELD PRESENCE BITSET                                         -->
+        <!-- ============================================================== -->
+
+        <set name="FieldPresence" encodingType="uint32"
+             description="Bitmask indicating which optional fields are present in this message">
+            <choice name="bidPrice"          description="Bid price is present">0</choice>
+            <choice name="askPrice"          description="Ask price is present">1</choice>
+            <choice name="lastTradePrice"    description="Last trade price is present">2</choice>
+            <choice name="settlementPrice"   description="Settlement price is present">3</choice>
+            <choice name="openPrice"         description="Open price is present">4</choice>
+            <choice name="highPrice"         description="Session high price is present">5</choice>
+            <choice name="lowPrice"          description="Session low price is present">6</choice>
+            <choice name="impliedBidPrice"   description="Implied bid price is present">7</choice>
+            <choice name="impliedAskPrice"   description="Implied ask price is present">8</choice>
+            <choice name="vwapPrice"         description="VWAP is present">9</choice>
+            <choice name="bidSize"           description="Bid size is present">10</choice>
+            <choice name="askSize"           description="Ask size is present">11</choice>
+            <choice name="lastTradeQty"      description="Last trade quantity is present">12</choice>
+            <choice name="totalVolume"       description="Total cleared volume is present">13</choice>
+            <choice name="electronicVolume"  description="Electronic volume is present">14</choice>
+            <choice name="openInterest"      description="Open interest is present">15</choice>
+            <choice name="highLimitPrice"    description="High limit price is present">16</choice>
+            <choice name="lowLimitPrice"     description="Low limit price is present">17</choice>
+            <choice name="maxPriceVariation" description="Max price variation is present">18</choice>
+            <choice name="tradingStatus"     description="Trading status is present">19</choice>
+            <choice name="settlementType"    description="Settlement type is present">20</choice>
+            <choice name="bidNumOrders"      description="Bid number of orders is present">21</choice>
+            <choice name="askNumOrders"      description="Ask number of orders is present">22</choice>
+            <!-- Bits 23-31 reserved -->
+        </set>
+    </types>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 1: MarketDataTick — SNAPSHOT / RECOVERY MESSAGE            -->
+    <!--                                                                    -->
+    <!--  v4 role change: MarketDataDelta (id=9) is the PRIMARY steady-     -->
+    <!--  state flow; MarketDataTick is the SNAPSHOT and recovery flow —    -->
+    <!--  published on connect, periodically (configurable, conflated),     -->
+    <!--  and on consumer request.  It therefore remains fully self-        -->
+    <!--  describing (full instrument identity carried), unlike the         -->
+    <!--  compact high-rate messages.                                       -->
+    <!--                                                                    -->
+    <!--  It may still be sent with updateType=DELTA by simple line         -->
+    <!--  handlers that don't implement MarketDataDelta.                    -->
+    <!--                                                                    -->
+    <!--  CME mapping unchanged from v3 (see field descriptions).           -->
+    <!--                                                                    -->
+    <!--  v4 layout: fields ordered wide→narrow for 8-byte alignment.       -->
+    <!--  Body starts at absolute offset 56 (8-byte aligned).               -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="MarketDataTick" id="1" description="Normalized market data snapshot (or simple-handler delta) for a single instrument — fully self-describing">
+
+        <!-- Common header: abs 8..55 -->
+        <field name="header"           id="1"  type="gcmHeader"
+               description="GCM common header. sequenceId abs 8, sequenceTimestamp abs 32."/>
+
+        <!-- ======== 8-byte fields (doubles) — abs 56.. ======== -->
+        <field name="bidPrice"         id="20" type="PriceOptional"
+               description="Best bid price. CME: MDEntryType 0 (Bid)."/>
+        <field name="askPrice"         id="21" type="PriceOptional"
+               description="Best ask/offer price. CME: MDEntryType 1 (Offer)."/>
+        <field name="lastTradePrice"   id="22" type="PriceOptional"
+               description="Last trade price. CME: MDEntryType 2 (Trade) from MDIncrementalRefreshTradeSummary."/>
+        <field name="settlementPrice"  id="23" type="PriceOptional"
+               description="Settlement price. CME: MDEntryType 6 (SettlementPrice) from MDIncrementalRefreshDailyStatistics."/>
+        <field name="openPrice"        id="24" type="PriceOptional"
+               description="Session opening price. CME: MDEntryType 4 (OpenPrice) from MDIncrementalRefreshSessionStatistics."/>
+        <field name="highPrice"        id="25" type="PriceOptional"
+               description="Session high trade price. CME: MDEntryType 7 (TradingSessionHighPrice)."/>
+        <field name="lowPrice"         id="26" type="PriceOptional"
+               description="Session low trade price. CME: MDEntryType 8 (TradingSessionLowPrice)."/>
+        <field name="impliedBidPrice"  id="27" type="PriceOptional"
+               description="Implied bid price. CME: MDEntryType E (ImpliedBid)."/>
+        <field name="impliedAskPrice"  id="28" type="PriceOptional"
+               description="Implied ask/offer price. CME: MDEntryType F (ImpliedOffer)."/>
+        <field name="vwapPrice"        id="29" type="PriceOptional"
+               description="Session VWAP. CME: MDEntryType 9 (VWAP)."/>
+        <field name="highLimitPrice"   id="40" type="PriceOptional"
+               description="Upper price limit for the trading day. CME: tag 1149 HighLimitPrice."/>
+        <field name="lowLimitPrice"    id="41" type="PriceOptional"
+               description="Lower price limit for the trading day. CME: tag 1148 LowLimitPrice."/>
+        <field name="maxPriceVariation" id="42" type="PriceOptional"
+               description="Differential value for price banding. CME: tag 1143 MaxPriceVariation."/>
+        <field name="minPriceIncrement" id="60" type="PriceOptional"
+               description="Minimum price increment (tick size). CME: tag 969 MinPriceIncrement."/>
+        <field name="displayFactor"    id="61" type="DecimalOptional"
+               description="Multiplier to convert price to conventional display. CME: tag 9787 DisplayFactor."/>
+        <field name="contractSize"     id="63" type="DecimalOptional"
+               description="Contract size in UoM units. CME: tag 1147 UnitOfMeasureQty."/>
+
+        <!-- ======== 8-byte fields (quantities, int64) ======== -->
+        <field name="bidSize"          id="30" type="QtyNULL"
+               description="Aggregate size at best bid. CME: MDEntrySize where MDEntryType=Bid."/>
+        <field name="askSize"          id="31" type="QtyNULL"
+               description="Aggregate size at best ask. CME: MDEntrySize where MDEntryType=Offer."/>
+        <field name="lastTradeQty"     id="32" type="QtyNULL"
+               description="Last trade quantity. CME: MDEntrySize from MDIncrementalRefreshTradeSummary."/>
+        <field name="totalVolume"      id="33" type="QtyNULL"
+               description="Total cleared volume for the session. CME: MDEntryType B (ClearedVolume)."/>
+        <field name="electronicVolume" id="34" type="QtyNULL"
+               description="Cumulative electronic traded volume. CME: MDEntryType e (ElectronicVolume)."/>
+        <field name="openInterest"     id="35" type="QtyNULL"
+               description="Open interest. CME: MDEntryType C (OpenInterest)."/>
+
+        <!-- ======== 4-byte fields ======== -->
+        <field name="fieldPresence"    id="8"  type="FieldPresence"
+               description="Bitmask indicating which optional fields carry data in this message"/>
+        <field name="sourceSeqNum"     id="9"  type="uint32"
+               description="Source-specific per-instrument sequence number (e.g. CME RptSeq)"/>
+        <field name="instrumentId"     id="19" type="InstrumentId"
+               description="v4: GCM-MD compact numeric instrument key. Matches InstrumentDefinition.instrumentId."/>
+        <field name="sourceSecurityId" id="13" type="int32"
+               description="Source-native instrument ID. CME: tag 48 SecurityID."/>
+        <field name="bidNumOrders"     id="36" type="Int32NULL"
+               description="Aggregate number of orders at best bid. CME: NumberOfOrders from Book (Bid)."/>
+        <field name="askNumOrders"     id="37" type="Int32NULL"
+               description="Aggregate number of orders at best ask. CME: NumberOfOrders from Book (Offer)."/>
+        <field name="expiryDate"       id="64" type="Int32NULL"
+               description="Last trading date as YYYYMMDD. Derived from CME EventType=LastEligibleTradeDate."/>
+
+        <!-- ======== 5-byte composite ======== -->
+        <field name="maturityMonthYear" id="17" type="MaturityMonthYear"
+               description="Contract maturity. CME: tag 200."/>
+
+        <!-- ======== 1-byte fields (enums) ======== -->
+        <field name="updateType"       id="5"  type="UpdateType"
+               description="SNAPSHOT (full state) or DELTA (only changed fields)"/>
+        <field name="assetClass"       id="6"  type="AssetClass"
+               description="Broad asset class for routing"/>
+        <field name="instrumentType"   id="7"  type="InstrumentType"
+               description="Future, option, spread, or spot"/>
+        <field name="tradingStatus"    id="50" type="TradingStatus"
+               description="Current trading state. CME: mapped from SecurityTradingStatus."/>
+        <field name="settlementType"   id="51" type="SettlementType"
+               description="Settlement price type. CME: mapped from SettlPriceType bitfield."/>
+
+        <!-- ======== char arrays (no alignment requirement) ======== -->
+        <field name="symbol"           id="10" type="Symbol"
+               description="GCM-MD normalized symbol. CME: derived from tag 55 with year expanded (NGQ6 → NGQ2026)."/>
+        <field name="sourceSymbol"     id="18" type="SourceSymbol"
+               description="Exact symbol as received from data source. CME: tag 55 Symbol verbatim (e.g. NGQ6)."/>
+        <field name="source"           id="11" type="Source"
+               description="Data source (CME, ICE, BBG, etc.)"/>
+        <field name="exchange"         id="12" type="Exchange"
+               description="Exchange code (NYMX, XCME, etc.). CME: tag 207."/>
+        <field name="asset"            id="14" type="Asset"
+               description="Product code. CME: tag 6937 Asset."/>
+        <field name="securityGroup"    id="15" type="SecurityGroup"
+               description="Security group. CME: tag 1151 SecurityGroup."/>
+        <field name="currency"         id="16" type="Currency"
+               description="Price currency (USD, EUR, etc.). CME: tag 15."/>
+        <field name="unitOfMeasure"    id="62" type="UnitOfMeasure"
+               description="Unit of measure for contract size. CME: tag 996 (e.g. MMBtu for NG)."/>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 2: InstrumentDefinition — IDENTITY AUTHORITY               -->
+    <!--                                                                    -->
+    <!--  v4: now the SINGLE source of instrument identity.  High-rate      -->
+    <!--  messages carry only instrumentId; consumers MUST build their     -->
+    <!--  instrument registry from this message before (or while)          -->
+    <!--  processing data messages.  Line handlers publish it:              -->
+    <!--    - when a new instrument is detected                             -->
+    <!--    - when a definition changes                                     -->
+    <!--    - periodically (configurable refresh, e.g. every 60s)           -->
+    <!--    - on consumer request (out-of-band snapshot service)            -->
+    <!--                                                                    -->
+    <!--  CME source: SecurityDefinition (templates 54, 55, 56).            -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="InstrumentDefinition" id="2" description="Instrument reference/static data — the identity authority mapping instrumentId to full identity">
+
+        <field name="header"               id="1"  type="gcmHeader"
+               description="GCM common header"/>
+
+        <!-- 8-byte fields -->
+        <field name="activationTime"       id="50" type="UInt64NULL" semanticType="UTCTimestamp"
+               description="Instrument activation time (nanos epoch). CME: EventType=Activation."/>
+        <field name="expirationTime"       id="51" type="UInt64NULL" semanticType="UTCTimestamp"
+               description="Instrument expiration time (nanos epoch). CME: EventType=LastEligibleTradeDate."/>
+        <field name="minPriceIncrement"    id="30" type="Price"
+               description="Minimum price tick. CME: tag 969."/>
+        <field name="displayFactor"        id="31" type="Decimal"
+               description="Price display conversion factor. CME: tag 9787."/>
+        <field name="contractSize"         id="33" type="DecimalOptional"
+               description="Contract size in UoM. CME: tag 1147."/>
+        <field name="tradingRefPrice"      id="40" type="PriceOptional"
+               description="Reference/settlement price from prior session. CME: tag 1150."/>
+        <field name="highLimitPrice"       id="41" type="PriceOptional"
+               description="High limit price. CME: tag 1149."/>
+        <field name="lowLimitPrice"        id="42" type="PriceOptional"
+               description="Low limit price. CME: tag 1148."/>
+        <field name="maxPriceVariation"    id="43" type="PriceOptional"
+               description="Max price variation. CME: tag 1143."/>
+        <field name="priorSettlePrice"     id="44" type="PriceOptional"
+               description="Prior session settlement. CME: tag 1150 TradingReferencePrice."/>
+
+        <!-- 4-byte fields -->
+        <field name="instrumentId"         id="60" type="InstrumentId"
+               description="v4: GCM-MD compact numeric instrument key. THE key that all high-rate messages carry. Assigned at discovery; stable for the session."/>
+        <field name="sourceSecurityId"     id="13" type="int32"
+               description="Source-native security ID. CME: tag 48."/>
+        <field name="minTradeVol"          id="34" type="uint32"
+               description="Minimum trading volume. CME: tag 562."/>
+        <field name="maxTradeVol"          id="35" type="uint32"
+               description="Maximum trading volume. CME: tag 1140."/>
+        <field name="originalContractSize" id="36" type="Int32NULL"
+               description="Fixed contract value. CME: tag 5849."/>
+        <field name="priorVolume"          id="45" type="Int32NULL"
+               description="Prior session cleared volume. CME: tag 5791."/>
+        <field name="priorOpenInterest"    id="46" type="Int32NULL"
+               description="Prior session open interest. CME: tag 5792."/>
+
+        <!-- 5-byte composite -->
+        <field name="maturityMonthYear"    id="18" type="MaturityMonthYear"
+               description="Contract maturity"/>
+
+        <!-- 1-byte fields -->
+        <field name="assetClass"           id="19" type="AssetClass"
+               description="Asset class"/>
+        <field name="instrumentType"       id="20" type="InstrumentType"
+               description="Instrument type (future, option, etc.)"/>
+        <field name="tradingStatus"        id="52" type="TradingStatus"
+               description="Trading status at definition time"/>
+
+        <!-- char arrays -->
+        <field name="symbol"               id="10" type="Symbol"
+               description="GCM-MD normalized symbol (e.g. NGQ2026)"/>
+        <field name="sourceSymbol"         id="21" type="SourceSymbol"
+               description="Exact symbol as received from data source. CME: tag 55 verbatim (e.g. NGQ6)."/>
+        <field name="source"               id="11" type="Source"
+               description="Data source (CME)"/>
+        <field name="exchange"             id="12" type="Exchange"
+               description="Exchange (NYMX)"/>
+        <field name="asset"                id="14" type="Asset"
+               description="Product code (NG)"/>
+        <field name="securityGroup"        id="15" type="SecurityGroup"
+               description="Security group"/>
+        <field name="currency"             id="16" type="Currency"
+               description="Price currency"/>
+        <field name="settlCurrency"        id="17" type="Currency"
+               description="Settlement currency. CME: tag 120."/>
+        <field name="unitOfMeasure"        id="32" type="UnitOfMeasure"
+               description="Contract unit of measure (MMBtu, bushels, etc.). CME: tag 996."/>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 3: TradeSummary — v4 COMPACT (instrumentId only)           -->
+    <!--  CME source: MDIncrementalRefreshTradeSummary48 / 65                -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="TradeSummary" id="3" description="Trade execution detail for a single instrument — compact, identity via instrumentId">
+
+        <field name="header"           id="1"  type="gcmHeader"
+               description="GCM common header"/>
+
+        <!-- 8-byte fields -->
+        <field name="tradePrice"       id="20" type="Price"
+               description="Trade price. CME: MDEntryPx from TradeSummary."/>
+        <field name="tradeQty"         id="21" type="int64"
+               description="Consolidated trade quantity. CME: MDEntrySize from TradeSummary."/>
+        <field name="sourceTradeId"    id="24" type="UInt64NULL"
+               description="Source-specific trade ID. CME: MDTradeEntryID."/>
+
+        <!-- 4-byte fields -->
+        <field name="instrumentId"     id="30" type="InstrumentId"
+               description="v4: compact instrument key. Resolve via InstrumentDefinition."/>
+        <field name="sourceSeqNum"     id="25" type="uint32"
+               description="Source per-instrument seq num. CME: RptSeq."/>
+        <field name="numberOfOrders"   id="22" type="int32"
+               description="Number of orders participating in the match. CME: NumberOfOrders."/>
+
+        <!-- 1-byte fields -->
+        <field name="aggressorSide"    id="23" type="AggressorSide"
+               description="Aggressor side. CME: AggressorSide."/>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 4: Heartbeat — v4: LINE HANDLER *AND* SEQUENCER            -->
+    <!--                                                                    -->
+    <!--  Line handler:  feed liveness (as v3).                              -->
+    <!--  Sequencer:     emitted every N ms (config, e.g. 100ms) on the     -->
+    <!--                 sequenced egress stream, stamped like any other    -->
+    <!--                 message, carrying highWaterSequenceId.  This is    -->
+    <!--                 what makes gap detection SOUND: during a quiet     -->
+    <!--                 market a consumer can now distinguish "no data"    -->
+    <!--                 from "missing data", and gets sequencer liveness   -->
+    <!--                 independent of Kubernetes probes.                  -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="Heartbeat" id="4" description="Liveness signal — line handler feed liveness or sequencer high-water-mark heartbeat">
+
+        <field name="header"           id="1" type="gcmHeader"
+               description="GCM common header. For SEQUENCER heartbeats, sequenceId/sequenceTimestamp are stamped normally."/>
+
+        <!-- 8-byte fields -->
+        <field name="highWaterSequenceId" id="6" type="UInt64NULL"
+               description="v4: current high-water (last assigned) sequenceId. Populated on SEQUENCER heartbeats; null on line handler heartbeats. Consumers use this for quiet-market gap detection."/>
+        <field name="messageCount"     id="5" type="uint64"
+               description="Cumulative message count since component start"/>
+
+        <!-- 4-byte fields -->
+        <field name="instrumentCount"  id="4" type="uint32"
+               description="Number of active instruments (line handler heartbeats; 0 for sequencer)"/>
+
+        <!-- 1-byte fields -->
+        <field name="heartbeatType"    id="7" type="HeartbeatType"
+               description="v4: LINE_HANDLER or SEQUENCER"/>
+
+        <!-- char arrays -->
+        <field name="source"           id="3" type="Source"
+               description="Emitting component identifier (e.g. CME, SEQR)"/>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 5: BookUpdate (MBP) — v4 COMPACT (instrumentId only)       -->
+    <!--  CME source: MDIncrementalRefreshBook46/64, SnapshotFullRefresh     -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="BookUpdate" id="5" description="Multi-level aggregate order book update (MBP) — depth levels 1-10 per side, identity via instrumentId">
+
+        <field name="header"           id="1"  type="gcmHeader"
+               description="GCM common header"/>
+
+        <!-- 4-byte fields -->
+        <field name="instrumentId"     id="20" type="InstrumentId"
+               description="v4: compact instrument key. Resolve via InstrumentDefinition."/>
+        <field name="sourceSeqNum"     id="15" type="uint32"
+               description="Source per-instrument seq num. CME: RptSeq."/>
+
+        <!-- 1-byte fields -->
+        <field name="updateType"       id="14" type="UpdateType"
+               description="SNAPSHOT (full book) or DELTA (incremental level updates)"/>
+
+        <!-- Repeating group: price-level entries.
+             Entry layout (19 bytes): price(8) size(8) numberOfOrders... 
+             ordered wide→narrow within the entry: price, size, then
+             numberOfOrders/tradeableSize (4), then level/side/action (1). -->
+        <group name="bookEntries" id="100" description="Price level entries" dimensionType="groupSizeEncoding">
+            <field name="price"            id="101" type="PriceOptional"
+                   description="Price at this book level. CME: MDEntryPx."/>
+            <field name="size"             id="102" type="QtyNULL"
+                   description="Aggregate quantity at this level. CME: MDEntrySize."/>
+            <field name="numberOfOrders"   id="103" type="Int32NULL"
+                   description="Number of orders at this level. CME: NumberOfOrders."/>
+            <field name="tradeableSize"    id="107" type="Int32NULL"
+                   description="Tradeable qty at this level. CME: TradeableSize."/>
+            <field name="priceLevel"       id="104" type="uint8"
+                   description="Book level: 1=best ... 10=deepest. CME: MDPriceLevel."/>
+            <field name="side"             id="105" type="Side"
+                   description="Side. CME: MDEntryTypeBook."/>
+            <field name="action"           id="106" type="BookAction"
+                   description="Update action. CME: MDUpdateAction."/>
+        </group>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 6: MatchEventBoundary — v4 SEMANTICS FIX                   -->
+    <!--                                                                    -->
+    <!--  Line handler emits this after publishing all messages derived     -->
+    <!--  from one CME matching-engine event (MatchEventIndicator bit 7,    -->
+    <!--  EndOfEvent).  All messages of the event, including this one,     -->
+    <!--  carry the same gcmHeader.eventId.                                 -->
+    <!--                                                                    -->
+    <!--  firstSequenceId / lastSequenceId are placed IMMEDIATELY after     -->
+    <!--  the common header at ABSOLUTE offsets 56 and 64 so the sequencer  -->
+    <!--  can (optionally, config-enabled) stamp them with the global      -->
+    <!--  sequence range of the event, tracked per eventId.  Line handlers  -->
+    <!--  write 0 to both.  With messageCount, consumers get atomic-event  -->
+    <!--  replay by global range AND torn-event detection by count.         -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="MatchEventBoundary" id="6" description="End-of-event marker for atomic event processing. eventId in gcmHeader links all messages of the event.">
+
+        <field name="header"           id="1" type="gcmHeader"
+               description="GCM common header. eventId (abs 40) identifies this event; identical across all messages of the event."/>
+
+        <!-- 8-byte fields — SEQUENCER-STAMPED at fixed absolute offsets -->
+        <field name="firstSequenceId"  id="6" type="uint64"
+               description="ABSOLUTE OFFSET 56. Global sequenceId of the first message of this event. Stamped by the SEQUENCER (optional feature); line handler writes 0."/>
+        <field name="lastSequenceId"   id="7" type="uint64"
+               description="ABSOLUTE OFFSET 64. Global sequenceId of the last message of this event (excluding this boundary). Stamped by the SEQUENCER (optional feature); line handler writes 0."/>
+
+        <!-- 2-byte fields -->
+        <field name="messageCount"     id="5" type="uint16"
+               description="Number of data messages in this event (excluding this boundary). Line-handler written; consumers verify buffered count against this to detect torn events."/>
+
+        <!-- 1-byte fields -->
+        <field name="eventFlags"       id="4" type="uint8"
+               description="Event content flags: bit0=trades, bit1=volume, bit2=quotes, bit3=statistics, bit4=implied, bit5=recovery. CME: MatchEventIndicator bits."/>
+
+        <!-- char arrays -->
+        <field name="source"           id="3" type="Source"
+               description="Data source"/>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 7: OrderUpdate (MBO) — v4 COMPACT (instrumentId only)      -->
+    <!--  CME source: MDIncrementalRefreshBook46/64 NoOrderIDEntries,        -->
+    <!--              MDIncrementalRefreshOrderBook47,                       -->
+    <!--              SnapshotFullRefreshOrderBook53                         -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="OrderUpdate" id="7" description="Individual order update (MBO) — single order new/change/delete, identity via instrumentId">
+
+        <field name="header"           id="1"  type="gcmHeader"
+               description="GCM common header"/>
+
+        <!-- 8-byte fields -->
+        <field name="orderId"          id="20" type="uint64"
+               description="Unique order identifier assigned by the exchange. CME: OrderID."/>
+        <field name="orderPriority"    id="21" type="UInt64NULL"
+               description="Order priority for execution on the book. CME: MDOrderPriority."/>
+        <field name="price"            id="22" type="PriceOptional"
+               description="Order price. CME: MDEntryPx."/>
+
+        <!-- 4-byte fields -->
+        <field name="instrumentId"     id="30" type="InstrumentId"
+               description="v4: compact instrument key. Resolve via InstrumentDefinition."/>
+        <field name="sourceSeqNum"     id="14" type="uint32"
+               description="Source per-instrument seq num. CME: RptSeq."/>
+        <field name="displayQty"       id="23" type="Int32NULL"
+               description="Visible order quantity. CME: MDDisplayQty."/>
+
+        <!-- 1-byte fields -->
+        <field name="side"             id="24" type="Side"
+               description="Side. CME: MDEntryTypeBook."/>
+        <field name="action"           id="25" type="OrderAction"
+               description="Order action. CME: OrderUpdateAction."/>
+        <field name="updateType"       id="26" type="UpdateType"
+               description="SNAPSHOT (full order book) or DELTA (individual order update)"/>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 8: TradeFill — v4 COMPACT (instrumentId only)              -->
+    <!--  CME source: MDIncrementalRefreshTradeSummary48/65 →                -->
+    <!--              NoOrderIDEntries group (OrderID + LastQty)             -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="TradeFill" id="8" description="Per-order fill details from a trade event — which orders were matched and for how much, identity via instrumentId">
+
+        <field name="header"           id="1"  type="gcmHeader"
+               description="GCM common header. eventId links fills to the trade's matching event."/>
+
+        <!-- 8-byte fields -->
+        <field name="tradePrice"       id="14" type="Price"
+               description="Trade price (same as parent TradeSummary). For consumer convenience."/>
+        <field name="sourceTradeId"    id="15" type="UInt64NULL"
+               description="Source trade entry ID linking to TradeSummary. CME: MDTradeEntryID."/>
+
+        <!-- 4-byte fields -->
+        <field name="instrumentId"     id="20" type="InstrumentId"
+               description="v4: compact instrument key. Resolve via InstrumentDefinition."/>
+        <field name="sourceSeqNum"     id="16" type="uint32"
+               description="Source per-instrument seq num. CME: RptSeq."/>
+
+        <!-- Repeating group: individual order fills.
+             Entry (12 bytes): orderId(8) fillQty(4) — wide→narrow. -->
+        <group name="fills" id="100" description="Individual order fills in this trade" dimensionType="groupSizeEncoding">
+            <field name="orderId"      id="101" type="uint64"
+                   description="Order ID that was filled. CME: OrderID from NoOrderIDEntries."/>
+            <field name="fillQty"      id="102" type="int32"
+                   description="Quantity filled for this order. CME: LastQty."/>
+        </group>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 9: MarketDataDelta — v4 PRIMARY STEADY-STATE FLOW          -->
+    <!--                                                                    -->
+    <!--  Compact incremental update carrying ONLY changed fields in a      -->
+    <!--  repeating group.  v4 makes this THE primary wire message:         -->
+    <!--  steady state is deltas; MarketDataTick SNAPSHOTs are the         -->
+    <!--  recovery/late-join flow (on connect, periodic conflated,          -->
+    <!--  on request).                                                      -->
+    <!--                                                                    -->
+    <!--  v4: identity reduced to instrumentId — the v3 requirement to      -->
+    <!--  mirror MarketDataTick's header layout is obsolete (gcmHeader      -->
+    <!--  guarantees stamping offsets structurally), so the ~97 bytes of    -->
+    <!--  per-message identity strings are gone.                            -->
+    <!--                                                                    -->
+    <!--  Typical wire size (3 changed fields): 8 + 48 + 13 + 4 + 27        -->
+    <!--  = 100 bytes (vs ~150 in v3, ~347 for a full tick).                -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="MarketDataDelta" id="9" description="Compact incremental update — only changed fields, identity via instrumentId. Primary steady-state message.">
+
+        <field name="header"            id="1"  type="gcmHeader"
+               description="GCM common header. sequenceId abs 8, sequenceTimestamp abs 32 — structurally identical to every other message."/>
+
+        <!-- 4-byte fields -->
+        <field name="fieldPresence"     id="8"  type="FieldPresence"
+               description="Bitmask of which fields are in changedFields group"/>
+        <field name="instrumentId"      id="19" type="InstrumentId"
+               description="v4: compact instrument key. Resolve via InstrumentDefinition."/>
+        <field name="sourceSeqNum"      id="9"  type="uint32"
+               description="Source per-instrument sequence number"/>
+
+        <!-- 1-byte fields -->
+        <field name="assetClass"        id="6"  type="AssetClass"
+               description="Broad asset class — retained for cheap consumer-side routing without registry lookup"/>
+
+        <!-- Changed fields repeating group.
+             Entry (9 bytes): value(8) fieldId(1) — value first for
+             within-entry alignment. -->
+        <group name="changedFields" id="100" description="Changed field values — only modified fields" dimensionType="groupSizeEncoding">
+            <field name="value"    id="102" type="int64"
+                   description="Field value as int64. Price fields (bits 0-9,16-18): Double.doubleToRawLongBits(double). Qty fields (10-15): raw long. Enum/status (19-22): ordinal widened to long."/>
+            <field name="fieldId"  id="101" type="uint8"
+                   description="Field ID — maps to FieldPresence bit position"/>
+        </group>
+    </sbe:message>
+
+    <!-- ================================================================== -->
+    <!--  MESSAGE 10: MessageBatch — v4 EGRESS TRANSPORT ENVELOPE            -->
+    <!--                                                                    -->
+    <!--  Created by the SEQUENCER after stamping.  Packs N complete SBE     -->
+    <!--  messages (each including its own messageHeader) into one NATS     -->
+    <!--  publish.  JetStream's cost model is per-publish, not per-byte —   -->
+    <!--  batching ~100 messages per publish is what makes 1M logical      -->
+    <!--  msgs/sec achievable on a persisted stream.                        -->
+    <!--                                                                    -->
+    <!--  Flush policy (sequencer config): maxMessages OR maxBytes OR       -->
+    <!--  maxLinger, whichever first; optional flush-on-event-boundary so   -->
+    <!--  a matching-engine event never straddles batches.                  -->
+    <!--                                                                    -->
+    <!--  firstSequenceId / lastSequenceId let consumers detect gaps        -->
+    <!--  between batches WITHOUT unpacking.  The envelope itself is not    -->
+    <!--  sequenced or stamped — its contents are.                          -->
+    <!--                                                                    -->
+    <!--  NOTE: this makes batching part of the message set (consumers get  -->
+    <!--  generated codecs) at the cost of the strict "transport-agnostic"  -->
+    <!--  principle.  Deliberate trade: codegen for every consumer beats    -->
+    <!--  a hand-rolled frame spec.                                         -->
+    <!-- ================================================================== -->
+
+    <sbe:message name="MessageBatch" id="10" description="Sequencer egress batch envelope — N stamped SBE messages in one publish">
+
+        <!-- 8-byte fields -->
+        <field name="firstSequenceId"  id="1" type="uint64"
+               description="sequenceId of the first packed message — batch-level gap detection without unpacking"/>
+        <field name="lastSequenceId"   id="2" type="uint64"
+               description="sequenceId of the last packed message"/>
+        <field name="batchTimestamp"   id="3" type="uint64" semanticType="UTCTimestamp"
+               description="Sequencer flush timestamp (nanos since epoch)"/>
+
+        <!-- 1-byte fields -->
+        <field name="flags"            id="4" type="uint8"
+               description="bit0 = batch ends on a MatchEventBoundary (event-aligned flush); bits 1-7 reserved"/>
+
+        <!-- Packed messages: each blob is one complete SBE message
+             (messageHeader + body), stamped, in sequence order. -->
+        <group name="messages" id="100" description="Packed messages in sequenceId order" dimensionType="groupSizeEncoding">
+            <data name="messageBlob" id="101" type="varBlobEncoding"
+                  description="One complete SBE message including its 8-byte messageHeader"/>
+        </group>
+    </sbe:message>
+
+</sbe:messageSchema>

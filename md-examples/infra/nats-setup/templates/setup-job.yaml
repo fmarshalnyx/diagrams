@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Fixed name (not generated per-release) so re-running `helm upgrade --install` on an
+  # existing bucket/stream setup is a clean re-run, not an ever-growing pile of Jobs — the
+  # deploy script deletes any prior completed Job with this name before install (idempotent).
+  name: nats-setup
+  labels:
+    app.kubernetes.io/part-of: nats-setup
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: nats-setup
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: nats-setup
+          image: {{ .Values.setupJob.image }}
+          command: ["/bin/sh", "/scripts/setup.sh"]
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: nats-setup-script
+            defaultMode: 0755

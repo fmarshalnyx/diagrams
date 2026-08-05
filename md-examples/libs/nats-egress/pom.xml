@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>nats-egress</artifactId>
+    <packaging>jar</packaging>
+
+    <!-- libs/nats-egress (design §3.2, §9): DestinationChannel + CoreNats/JetStream/Batching
+         destinations, extracted verbatim (package preserved) from services/sequencer-nats.
+         No Spring, no Kubernetes client (§3.3) — hosts wire EgressConfig/BatchingConfig/
+         EgressMetrics from their own config/metrics trees. services/sequencer-nats and
+         nats-bridge (§9) both compile against this same source. Also hosts
+         NatsIngressTransport, the NATS-side libs/ingress-transport implementation line handlers
+         can select by config as an alternative to libs/cluster-client's ClusterIngressClient. -->
+
+    <dependencies>
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>ingress-transport</artifactId>
+        </dependency>
+        <!-- Test only: SBE codecs for MessageBatch round-trip verification (§3.3). -->
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>md-models-sbe</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- §3.3: rules (no services/* dependency, no Spring dependency) are managed
+                 centrally in build/gcm-md-parent's pluginManagement; this bare declaration
+                 activates them for this module. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

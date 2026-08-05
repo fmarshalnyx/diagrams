@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>nats-bridge</artifactId>
+    <packaging>jar</packaging>
+
+    <properties>
+        <!-- Overrides the parent POM's default (true) - this is one of the 4 modules that
+             actually wants an image built. A global -Djib.skip=true (the build/integration CI
+             jobs use this) still wins over this module-level default, per normal Maven property
+             precedence - see the parent POM's own comment on why this is a property and not a
+             literal <skip> value in this module's <configuration> below. -->
+        <jib.skip>false</jib.skip>
+    </properties>
+
+    <!-- services/sequencer-aeron/nats-bridge (design §9): Spring Boot service subscribing to the
+         sequenced Aeron egress (live + Archive replay-merge to catch up after downtime) and
+         republishing to MD_SEQUENCED. Depends on the sibling libs/nats-egress module for
+         MessageBatch framing/flush policy — the same source phase-1 compiles against, so
+         batching behavior is identical by construction, not re-implemented. -->
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- Actuator alone has no embedded server; web is required for the /actuator/health
+             HTTP endpoint the readiness/liveness probes in deploy/helm/ target. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-all</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>nats-egress</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>nats-bridge</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>exec</classifier>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Container image (design §10, §11). -->
+            <plugin>
+                <groupId>com.google.cloud.tools</groupId>
+                <artifactId>jib-maven-plugin</artifactId>
+                <!-- Bound to package: see cluster-node/pom.xml's comment on this same plugin. -->
+                <executions>
+                    <execution>
+                        <id>build-image</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>dockerBuild</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!-- <skip> deliberately not set here - inherited from pluginManagement as
+                         ${jib.skip}, resolved via this module's own <properties> above. -->
+                    <from>
+                        <image>eclipse-temurin:25-jre-alpine</image>
+                    </from>
+                    <to>
+                        <image>gcm-md/nats-bridge</image>
+                        <tags>
+                            <tag>local</tag>
+                        </tags>
+                    </to>
+                    <container>
+                        <mainClass>gcm.md.natsbridge.NatsBridgeApplication</mainClass>
+                        <jvmFlags>
+                            <jvmFlag>-XX:+UseZGC</jvmFlag>
+                            <jvmFlag>-XX:+AlwaysPreTouch</jvmFlag>
+                        </jvmFlags>
+                        <ports>
+                            <port>8080</port>
+                        </ports>
+                        <user>1000:1000</user>
+                    </container>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

@@ -1,0 +1,111 @@
+{{- if .Values.lineHandlerTemplate.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gcm-md.lineHandlerTemplate.name" . }}
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: line-handler-template
+spec:
+  replicas: {{ .Values.lineHandlerTemplate.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: line-handler-template
+  template:
+    metadata:
+      labels:
+        {{- include "gcm-md.labels" . | nindent 8 }}
+        app.kubernetes.io/component: line-handler-template
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.lineHandlerTemplate.serverPort }}"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      serviceAccountName: {{ include "gcm-md.lineHandlerTemplate.name" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: line-handler-template
+          image: "{{ .Values.lineHandlerTemplate.image.repository }}:{{ .Values.lineHandlerTemplate.image.tag }}"
+          imagePullPolicy: {{ .Values.lineHandlerTemplate.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: "file:/workspace/config/"
+            - name: LINE_HANDLER_INGRESS_TRANSPORT
+              value: {{ .Values.lineHandlerTemplate.ingressTransport | quote }}
+            - name: LINE_HANDLER_UPSTREAM_URL
+              value: {{ .Values.nats.url | quote }}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # aeron.* is only consulted when ingress-transport=aeron, but harmless to always set —
+            # matches every member's per-member client endpoint (design §7), not a bare
+            # headless-Service name, which round-robins across pod IPs and isn't what
+            # AeronCluster's ingress connect logic expects per member entry.
+            - name: LINE_HANDLER_AERON_INGRESS_ENDPOINTS
+              value: {{ include "gcm-md.clusterNode.ingressEndpoints" . | quote }}
+            - name: LINE_HANDLER_AERON_CREDENTIAL
+              value: {{ .Values.lineHandlerTemplate.aeronCredential | quote }}
+            # Must be the pod's own routable IP, not localhost/the chart-default's loopback
+            # placeholder: this string is handed to the cluster leader as the address it should
+            # publish session responses/egress back to, so a "localhost" default resolves to the
+            # *leader's own* loopback, not this pod — a real bug caught by running this against a
+            # live cluster (same class of bug already fixed for nats-bridge's replay/response
+            # channels; see NATS_BRIDGE_CLUSTER_ARCHIVE_CONTROL_RESPONSE_CHANNEL above).
+            # term-length=64k is not optional: without it Aeron defaults to a ~48MB term buffer
+            # per publication (both this client's own subscription and the leader's matching
+            # outbound publication, which uses this exact channel string verbatim) — a second,
+            # deeper bug found live: the pod's default 64Mi /dev/shm can barely fit one such
+            # buffer, so every reconnect attempt leaked another ~48MB region until /dev/shm filled
+            # up and new allocations silently failed, masquerading as a network connectivity
+            # problem (ingressPublication connects fine, egress never does). Matches
+            # LINE_HANDLER_AERON_INGRESS_CHANNEL's default term-length.
+            - name: LINE_HANDLER_AERON_EGRESS_CHANNEL
+              value: "aeron:udp?endpoint=$(POD_IP):0|term-length=64k"
+            # nats-ingress.* is only consulted when ingress-transport=nats.
+            - name: LINE_HANDLER_NATS_INGRESS_URL
+              value: {{ .Values.nats.url | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.lineHandlerTemplate.serverPort }}
+          resources:
+            {{- toYaml .Values.lineHandlerTemplate.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            # Spring + Aeron client init takes ~45s locally; without this delay the liveness
+            # probe kills the container mid-startup (see nats-bridge's identical comment).
+            initialDelaySeconds: 60
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /workspace/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gcm-md.lineHandlerTemplate.name" . }}-config
+        - name: tmp
+          emptyDir: {}
+{{- end }}

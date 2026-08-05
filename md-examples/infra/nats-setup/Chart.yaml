@@ -1,0 +1,14 @@
+apiVersion: v2
+name: nats-setup
+description: >-
+  Official NATS chart (design §10, §11) plus an idempotent Job that creates the streams and
+  KV buckets the phase-2 pipeline needs (MD_RAW, MD_SEQUENCED, sequencer-lease,
+  bridge-checkpoint). NATS itself is a subchart dependency; nothing here forks or reimplements
+  it.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: nats
+    version: "2.14.2"
+    repository: "https://nats-io.github.io/k8s/helm/charts/"

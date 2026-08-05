@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcm-md-sequencer
+  labels:
+    app: gcm-md-sequencer
+spec:
+  replicas: 2 # single active + warm standby; leader election picks the active one (spec §10, §14)
+  selector:
+    matchLabels:
+      app: gcm-md-sequencer
+  template:
+    metadata:
+      labels:
+        app: gcm-md-sequencer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: gcm-md-sequencer
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sequencer
+          # Rewritten per environment by the `images:` transformer in each overlay's
+          # kustomization.yaml (registry/account/tag differ; see k8s/README.md).
+          image: gcm-md-sequencer:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: management
+              containerPort: 8081
+          # Selects the environment: every value that differs between local/dev/uat/prod/prod-dr
+          # (NATS endpoints, k8s namespace, metrics tags) lives in the matching
+          # application-{env}.yml baked into the jar and is activated purely by this one
+          # variable — see md-sequencer's own README and k8s/README.md.
+          envFrom:
+            - configMapRef:
+                name: gcm-md-sequencer-config
+          env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: JDK_JAVA_OPTIONS
+              value: >-
+                -XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch
+                -Xms4g -Xmx8g
+          resources:
+            # Guaranteed QoS: requests == limits (spec §14). Scaled down per environment by each
+            # overlay's patch-deployment.yaml — this is the prod/prod-dr tier.
+            requests:
+              cpu: "4"
+              memory: 8Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            # readOnlyRootFilesystem needs somewhere writable for the JVM's own temp usage.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

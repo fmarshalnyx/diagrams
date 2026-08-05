@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: nats-bridge
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,metrics,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    tags:
+      environment: unknown
+
+nats-bridge:
+  nats:
+    url: nats://localhost:4222
+    stream: MD_SEQUENCED
+    subject: md.sequenced
+    checkpoint-kv-bucket: bridge-checkpoint
+    checkpoint-kv-key: last-bridged-sequence-id
+    checkpoint-interval-messages: 1000
+    # See NatsBridgeProperties.Nats's own comment / ContiguityTracker's class Javadoc: a heuristic
+    # "give up and assume the checkpoint is stale" cutoff, not a proof - size well above the
+    # expected worst-case replay-catchup backlog for this deployment.
+    checkpoint-reset-threshold-messages: 100000
+    max-stall-ms: 500
+    jetstream-max-in-flight: 8192
+  cluster:
+    # Comma-separated, one per cluster member — see NatsBridgeProperties.Cluster's own comment.
+    archive-control-channels: "aeron:udp?endpoint=localhost:9050"
+    archive-control-response-channel: "aeron:udp?endpoint=localhost:9051"
+    subscription-channel: "aeron:udp?control-mode=manual"
+    live-destination: "aeron:udp?endpoint=localhost:9070"
+    replay-destination: "aeron:udp?endpoint=localhost:9081"
+    replay-channel: "aeron:udp?endpoint=localhost:9081"
+    egress-stream-id: 1
+  stamping:
+    sequence-id-offset: 8
+    schema-id: 100
+    schema-id-offset: 4
+  batching:
+    enabled: true
+    max-messages: 100
+    max-bytes: 65536
+    max-linger-micros: 1000
+    flush-on-event-boundary: true
+    template-id-offset: 2
+    boundary-template-id: 6

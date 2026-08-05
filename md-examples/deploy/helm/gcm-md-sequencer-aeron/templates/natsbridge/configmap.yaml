@@ -1,0 +1,12 @@
+{{- if .Values.natsBridge.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gcm-md.natsBridge.name" . }}-config
+  labels:
+    {{- include "gcm-md.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats-bridge
+data:
+  application.yml: |
+{{ .Values.natsBridge.configYaml | indent 4 }}
+{{- end }}

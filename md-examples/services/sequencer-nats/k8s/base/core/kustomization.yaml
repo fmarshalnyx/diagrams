@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The "always needed" resources. ../pdb and ../observability are separate small kustomizations
+# (not loose files) because dev/uat/prod/prod-dr include them but local doesn't — kustomize
+# requires anything an overlay pulls in from outside its own directory tree to be a full
+# kustomization directory, not a bare file. See k8s/README.md.
+resources:
+  - deployment.yaml
+  - rbac.yaml
+  - service.yaml
+
+labels:
+  - pairs:
+      app: gcm-md-sequencer
+    includeSelectors: true

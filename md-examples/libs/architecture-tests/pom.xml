@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>gcm.md</groupId>
+        <artifactId>gcm-md-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+        <relativePath>../../build/gcm-md-parent</relativePath>
+    </parent>
+
+    <artifactId>architecture-tests</artifactId>
+    <packaging>jar</packaging>
+
+    <!-- Design §3.3 / §12.3: test-only module scanning compiled classes of other libs/*
+         modules for import-level boundary violations (no Spring, no services/* imports) —
+         a source-level complement to the maven-enforcer module-level bans in
+         build/gcm-md-parent. Also hosts the §12.3 wall-clock/randomness ban for
+         libs/sequencer-core. The SAME ban for SequencerClusteredService does NOT live here —
+         it's a services/* class, and this module can't depend on services/* without violating
+         its own enforced rule — so cluster-node hosts an identical, separate ArchUnit test
+         locally instead (see its own architecture test class). -->
+
+    <dependencies>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>nats-egress</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>md-models-sbe</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>gcm.md</groupId>
+            <artifactId>sequencer-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- §3.3: this is itself a libs/* module; activate the same managed bans. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

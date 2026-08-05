@@ -1,0 +1,356 @@
+# GCM-MD CI/CD pipeline (implementation-steps.md Milestone 11, design §16).
+#
+# Stages: build -> test -> integration -> package -> deploy. Path-scoped via `rules: changes:`
+# on merge requests (touching an unrelated part of the reactor shouldn't force a full rebuild of
+# everything); the default branch always runs the full reactor regardless of what changed, so
+# nothing latent slips through just because a path filter happened to miss it.
+#
+# Known gap, documented rather than silently worked around: the design's own §16 text says
+# "integration: failsafe *IT, Testcontainers NATS" - services/sequencer-aeron/integration-tests'
+# actual *IT suite (InProcessCluster) is fully in-process and needs neither Testcontainers nor a
+# live NATS server, so the `integration` stage below doesn't provision either. If a future *IT
+# class (or the §12.4 diff harness, run for real rather than just unit-tested) needs a live NATS,
+# add a `services:` entry here (the official `nats:` image, `-js` for JetStream) rather than
+# reaching for Testcontainers, which would need Docker-in-Docker on the runner - a `services:`
+# entry is simpler for "one reachable NATS instance" and is what mock-upstream-source/
+# line-handler-template's own local dev workflow already assumes.
+
+stages:
+  - build
+  - test
+  - integration
+  - package
+  - deploy
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+  MAVEN_CLI_OPTS: "--batch-mode --errors --fail-at-end -T 1C"
+  # Matches build/gcm-md-parent/pom.xml's Java 25 compiler target. 3.9 (not a full patch pin like
+  # 3.9.9) is deliberate - confirmed against the real registry while validating this pipeline
+  # locally (gitlab-ci-local): the official maven image only publishes major.minor precision for
+  # -eclipse-temurin-* variants, not full patch versions - maven:3.9.9-eclipse-temurin-25 was
+  # never a real tag and every job using it would fail to pull.
+  MAVEN_IMAGE: "maven:3.9-eclipse-temurin-25"
+
+# Full-reactor path patterns: anything under these touches every module transitively (parent POM,
+# schema, or a libs/* module many services depend on), so MR pipelines run the full build/test
+# even under path-scoping when these change - narrowing the rules below to "just the module that
+# changed" would be actively wrong here, not just conservative.
+.full_reactor_paths: &full_reactor_paths
+  - build/gcm-md-parent/pom.xml
+  - pom.xml
+  - schema/**/*
+  - libs/**/*
+
+.maven_cache: &maven_cache
+  key:
+    files:
+      - pom.xml
+      - build/gcm-md-parent/pom.xml
+  paths:
+    - .m2/repository
+  policy: pull-push
+
+.mr_or_default: &mr_or_default
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *full_reactor_paths
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "services/**/*"
+        - "deploy/**/*"
+        - ".gitlab-ci.yml"
+
+build:
+  stage: build
+  image: $MAVEN_IMAGE
+  <<: *mr_or_default
+  cache:
+    <<: *maven_cache
+  script:
+    # -Djib.skip=true: `install` runs through the `package` phase reactor-wide, which is exactly
+    # where cluster-node/nats-bridge/line-handler-template/mock-upstream-source each bind
+    # jib:dockerBuild (for local dev - deploy/local/10-build.sh's plain `mvn package`) - without
+    # this flag, this job fails needing a Docker daemon this runner doesn't have. Found running
+    # this pipeline locally via gitlab-ci-local: the `package:*` jobs below already avoid this
+    # (stopping at `compile` + explicit `jib:build`, see that section's own comment) but this
+    # earlier job never got the same protection. jib.skip disables all jib goals, not just
+    # dockerBuild, so this is safe regardless of which one would have fired.
+    - mvn $MAVEN_CLI_OPTS -DskipTests -Djib.skip=true install
+  artifacts:
+    paths:
+      - "**/target/*.jar"
+      - "**/target/classes/"
+      - "**/target/test-classes/"
+    expire_in: 1 hour
+
+test:
+  stage: test
+  image: $MAVEN_IMAGE
+  needs: ["build"]
+  <<: *mr_or_default
+  cache:
+    <<: *maven_cache
+    policy: pull
+  script:
+    # Surefire (unit tests, excludes *IT per build/gcm-md-parent/pom.xml) + maven-enforcer
+    # (libs/* boundary rules - the actually-working half of design §12.3's determinism suite).
+    - mvn $MAVEN_CLI_OPTS test
+    # libs/architecture-tests' ArchUnit rules are currently @Disabled (ArchUnit can't parse this
+    # reactor's Java 25 class files as of the latest published 1.4.2 - see that module's own
+    # class Javadoc) - `mvn test` above still runs it, and @Disabled tests report as skipped, not
+    # a silent no-op, so a future ArchUnit release that fixes this gets picked up automatically
+    # without a CI change.
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - "**/target/surefire-reports/*.xml"
+
+integration:
+  stage: integration
+  image: $MAVEN_IMAGE
+  needs: ["test"]
+  <<: *mr_or_default
+  cache:
+    <<: *maven_cache
+    policy: pull
+  # This job's embedded Aeron media drivers need real shared memory - confirmed running this
+  # pipeline locally (gitlab-ci-local): Docker's default 64m /dev/shm causes
+  # `org.agrona.IoUtil.mapNewFile` to fail outright (java.lang.InternalError, not a normal
+  # exception - a low-level mmap fault) for every *IT that launches its own MediaDriver, which is
+  # all of them (a 3-member in-process cluster per test, each member its own MediaDriver +
+  # Archive + consensus module, most of their internal channels using Aeron's default ~48MB
+  # term-buffer sizing rather than an explicit small override - only the ingress channel sets
+  # term-length=64k). A real GitLab Docker executor has no per-job .gitlab-ci.yml key for this -
+  # it's runner-level (config.toml's `[runners.docker] shm_size`). Whoever configures the real
+  # runner for this project MUST set that, or every job in this stage will fail confusingly - this
+  # isn't optional the way it might look from the YAML alone.
+  #
+  # shm_size = 1073741824 (1g) is the recommended default, empirically determined, not a round
+  # number picked blind: 512m (the next size tested down) was inconsistent - some *IT runs saw
+  # AeronCluster reconnect timeouts (contention-flavored failures, not the hard mmap fault above)
+  # that 1g didn't reproduce. 1g gave a clean, repeatable result: zero mmap faults, and only the
+  # already-documented DEFERRED IngressIdempotencyIT failing. (This was measured on a laptop also
+  # running a live Docker Desktop Kubernetes cluster concurrently - a real dedicated CI runner has
+  # less contention to begin with, so 1g has margin, not just the bare minimum.)
+  script:
+    # failsafe *IT suite (design §12.2): leader-kill contiguity, egress no-double-publish,
+    # follower reschedule, snapshot cycle, ingress idempotency - see this module's own pom.xml
+    # confidence note. In-process (embedded Aeron), no external services needed - see the
+    # top-of-file comment on why there's no `services:` NATS entry here.
+    #
+    # -Dsurefire.skip=true, NOT -DskipTests: the latter also skips failsafe (defeats the whole
+    # point of this job) - unit tests already ran in the `test` stage, this job wants *only* the
+    # *IT suite. Same flag this reactor's own local *IT runs already use.
+    # -Djib.skip=true: `verify` implies `package`, and `-am` pulls in cluster-node as a
+    # dependency - same jib:dockerBuild-needs-a-local-Docker-daemon problem the `build` job's own
+    # comment explains, found the same way (gitlab-ci-local). integration-tests itself has no jib
+    # binding; only its cluster-node dependency does.
+    - mvn $MAVEN_CLI_OPTS verify -pl services/sequencer-aeron/integration-tests -am -Dsurefire.skip=true -Djib.skip=true
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - "**/target/failsafe-reports/*.xml"
+
+# Nightly-only: the real embedded/multi-member cluster runtime tests (design §12.2) are slower
+# and heavier than what belongs gating every MR - see docs/AERON-SEQUENCER-3-MEMBER-CLUSTER-
+# STATUS.md for why IngressIdempotencyIT specifically is currently DEFERRED (a real,
+# reproduced-when-fresh flow-control finding, not flakiness) and should not silently block this
+# job if/when it's re-enabled without that investigation being resolved first.
+integration:nightly:
+  stage: integration
+  image: $MAVEN_IMAGE
+  needs: ["test"]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  cache:
+    <<: *maven_cache
+    policy: pull
+  script:
+    # -Djib.skip=true: `verify` implies `package`, and `-am` pulls in cluster-node as a
+    # dependency - same jib:dockerBuild-needs-a-local-Docker-daemon problem the `build` job's own
+    # comment explains, found the same way (gitlab-ci-local). integration-tests itself has no jib
+    # binding; only its cluster-node dependency does.
+    - mvn $MAVEN_CLI_OPTS verify -pl services/sequencer-aeron/integration-tests -am -Dsurefire.skip=true -Djib.skip=true
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - "**/target/failsafe-reports/*.xml"
+
+# One job per image-producing module (design §16: "jib:build (daemonless) -> $CI_REGISTRY_IMAGE/
+# <component>"). Deliberately does NOT run `mvn package` - every one of these modules also binds
+# jib:dockerBuild to the package phase for local dev (deploy/local/10-build.sh), which needs a
+# local Docker daemon this runner doesn't have. Stopping at `compile` and invoking `jib:build`
+# directly as a standalone goal (with -Dimage= overriding each pom's <to><image> local/gcm-md/...
+# target) skips that phase-bound execution entirely - daemonless, registry-targeted, exactly what
+# the design calls for.
+.package_image: &package_image
+  stage: package
+  image: $MAVEN_IMAGE
+  needs: ["test"]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  cache:
+    <<: *maven_cache
+    policy: pull
+
+package:cluster-node:
+  <<: *package_image
+  script:
+    - mvn $MAVEN_CLI_OPTS -pl services/sequencer-aeron/cluster-node -am compile jib:build
+        -Dimage=$CI_REGISTRY_IMAGE/cluster-node:$CI_COMMIT_SHORT_SHA
+        -Djib.to.auth.username=$CI_REGISTRY_USER -Djib.to.auth.password=$CI_REGISTRY_PASSWORD
+
+package:nats-bridge:
+  <<: *package_image
+  script:
+    - mvn $MAVEN_CLI_OPTS -pl services/sequencer-aeron/nats-bridge -am compile jib:build
+        -Dimage=$CI_REGISTRY_IMAGE/nats-bridge:$CI_COMMIT_SHORT_SHA
+        -Djib.to.auth.username=$CI_REGISTRY_USER -Djib.to.auth.password=$CI_REGISTRY_PASSWORD
+
+package:line-handler-template:
+  <<: *package_image
+  script:
+    - mvn $MAVEN_CLI_OPTS -pl services/sequencer-aeron/line-handler-template -am compile jib:build
+        -Dimage=$CI_REGISTRY_IMAGE/line-handler-template:$CI_COMMIT_SHORT_SHA
+        -Djib.to.auth.username=$CI_REGISTRY_USER -Djib.to.auth.password=$CI_REGISTRY_PASSWORD
+
+package:mock-upstream-source:
+  <<: *package_image
+  script:
+    - mvn $MAVEN_CLI_OPTS -pl services/sequencer-aeron/mock-upstream-source -am compile jib:build
+        -Dimage=$CI_REGISTRY_IMAGE/mock-upstream-source:$CI_COMMIT_SHORT_SHA
+        -Djib.to.auth.username=$CI_REGISTRY_USER -Djib.to.auth.password=$CI_REGISTRY_PASSWORD
+
+package:helm:
+  stage: package
+  image:
+    name: alpine/helm:3.16.2
+    entrypoint: [""]
+  needs:
+    - package:cluster-node
+    - package:nats-bridge
+    - package:line-handler-template
+    - package:mock-upstream-source
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - helm lint deploy/helm/gcm-md-sequencer-aeron
+    - helm package deploy/helm/gcm-md-sequencer-aeron
+        --app-version "$CI_COMMIT_SHORT_SHA" --version "0.1.0-$CI_COMMIT_SHORT_SHA"
+        --destination .
+  artifacts:
+    paths:
+      - "gcm-md-sequencer-aeron-*.tgz"
+    expire_in: 1 week
+
+.deploy_helm: &deploy_helm
+  image:
+    name: alpine/helm:3.16.2
+    entrypoint: [""]
+  needs: ["package:helm"]
+  script:
+    - >
+      helm upgrade --install gcm-md-sequencer-aeron gcm-md-sequencer-aeron-*.tgz
+      --namespace "gcm-md-$ENVIRONMENT" --create-namespace
+      -f environments/$ENVIRONMENT/values.yaml
+      --set clusterNode.image.tag=$CI_COMMIT_SHORT_SHA
+      --set natsBridge.image.tag=$CI_COMMIT_SHORT_SHA
+      --set lineHandlerTemplate.image.tag=$CI_COMMIT_SHORT_SHA
+      --set mockUpstreamSource.image.tag=$CI_COMMIT_SHORT_SHA
+      --wait --timeout 10m
+
+deploy:dev:
+  <<: *deploy_helm
+  stage: deploy
+  variables:
+    ENVIRONMENT: dev
+  environment:
+    name: dev
+    url: https://dev.gcm-md.internal
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# Manual, and produces a durable acceptance artifact (design §16). Milestone 5B.4 retired
+# sequencer-loadgen, so this now curls mock-upstream-source's /actuator/prometheus (via kubectl,
+# since the deploy image doesn't otherwise need one) and hard-fails on a nonzero
+# mock_upstream_gap/mock_upstream_duplicate reading - same "should be permanently zero" contract
+# 40-smoke-test.sh's local run already enforces (see implementation-steps.md's Milestone 5B.3
+# note). Unverified against a real GitLab instance, like the rest of this pipeline (Milestone 11).
+deploy:uat:
+  <<: *deploy_helm
+  stage: deploy
+  variables:
+    ENVIRONMENT: uat
+  environment:
+    name: uat
+    url: https://uat.gcm-md.internal
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+  after_script:
+    - apk add --no-cache curl kubectl
+    - >
+      METRICS=$(kubectl exec deploy/gcm-md-sequencer-aeron-mock-upstream-source
+      --namespace "gcm-md-uat" -- wget -qO- http://localhost:8080/actuator/prometheus)
+    - echo "$METRICS" | grep -E "^mock_upstream_(gap|duplicate|observed|published)\{" > mock-upstream-acceptance.txt
+    - cat mock-upstream-acceptance.txt
+    - >
+      if echo "$METRICS" | grep -qE "^mock_upstream_(gap|duplicate)\{[^}]*\} [1-9]"; then
+        echo "UAT acceptance FAILED: mock_upstream_gap/mock_upstream_duplicate is nonzero" >&2
+        exit 1
+      fi
+  artifacts:
+    paths:
+      - mock-upstream-acceptance.txt
+    expire_in: 30 days
+
+deploy:prod:
+  <<: *deploy_helm
+  stage: deploy
+  variables:
+    ENVIRONMENT: prod
+  environment:
+    name: prod
+    url: https://gcm-md.internal
+  rules:
+    # Requires uat-green on the same SHA (design §16) - GitLab's `needs:` can't express
+    # "a job in a different, already-completed pipeline succeeded"; enforce this manually before
+    # clicking deploy:prod's manual play button until a more automatic gate is worth building.
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+  before_script:
+    - echo "Manual gate - confirm deploy:uat succeeded for this exact commit SHA ($CI_COMMIT_SHORT_SHA) before proceeding."
+
+deploy:prod-dr:
+  <<: *deploy_helm
+  stage: deploy
+  variables:
+    ENVIRONMENT: prod-dr
+  environment:
+    name: prod-dr
+    url: https://dr.gcm-md.internal
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: manual
+
+# Tag pipeline (v*): publish libs/cluster-client + libs/md-models-sbe to the GitLab Maven
+# registry (design §16) - the two libs a real (non-template) line handler needs to depend on.
+publish:maven:
+  stage: package
+  image: $MAVEN_IMAGE
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  cache:
+    <<: *maven_cache
+    policy: pull
+  script:
+    - mvn $MAVEN_CLI_OPTS -pl libs/md-models-sbe,libs/cluster-client -am
+        deploy -DskipTests
+        -DaltDeploymentRepository=gitlab-maven::default::${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/maven

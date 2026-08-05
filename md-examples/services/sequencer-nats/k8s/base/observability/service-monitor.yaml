@@ -1,0 +1,17 @@
+# Requires the Prometheus Operator CRDs — not included in the local overlay (Docker Desktop
+# clusters typically don't have kube-prometheus-stack installed). Included explicitly by the
+# dev/uat/prod/prod-dr overlays; see k8s/README.md.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gcm-md-sequencer
+  labels:
+    app: gcm-md-sequencer
+spec:
+  selector:
+    matchLabels:
+      app: gcm-md-sequencer
+  endpoints:
+    - port: management
+      path: /actuator/prometheus
+      interval: 5s
